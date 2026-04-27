@@ -19,7 +19,162 @@ export const INITIAL_GAME_STATE: GameState = {
   artifacts: [],
   pendingArtifact: false,
   pendingEvolution: false,
+  pendingRiskChoice: false,
+  selectedChallenge: 'NORMAL',
+  activeRiskIds: [],
+  missionClaims: [],
+  missionChainStep: 0,
+  missionLastRefresh: new Date().toISOString().slice(0, 10),
+  title: '첫 방어자',
+  unlockedTitles: ['첫 방어자'],
+  prestigeCount: 0,
+  transcendencePoints: 0,
+  missionSeedDate: new Date().toISOString().slice(0, 10),
+  hiddenClues: [],
+  solvedMysteries: [],
+  masteryXp: {},
+  prestigeUpgrades: {},
+  coreMemories: {},
 };
+
+export const CHALLENGE_MODES = [
+  { id: 'NORMAL', name: '일반 런', description: '표준 규칙으로 진행합니다.', rewardMult: 1 },
+  { id: 'BOSS_RUSH', name: '보스 러시', description: '보스가 더 자주 등장합니다.', rewardMult: 1.4 },
+  { id: 'SILENCE_NIGHT', name: '침묵의 밤', description: '궁극기 사용 불가, 기본 공격 강화.', rewardMult: 1.3 },
+  { id: 'ELITE_INVASION', name: '엘리트 침공', description: '적이 강해지지만 보상 증가.', rewardMult: 1.5 },
+  { id: 'OVERHEAT_FIELD', name: '과열 전장', description: '공격 증가, 체력 지속 감소.', rewardMult: 1.4 },
+  { id: 'GREED_TRIAL', name: '탐욕의 시험', description: '획득 보상 증가, 코어가 더 약함.', rewardMult: 1.6 },
+] as const;
+
+export const RISK_OPTIONS = [
+  { id: 'risk_1', name: '코인 +100% / 적 체력 +80%', description: '코인 수급 극대화', apply: { reward: 2.0, coreDamage: 0.9 } },
+  { id: 'risk_2', name: '공격력 +150% / 체력 -50%', description: '유리 대포 빌드', apply: { coreDamage: 2.5, coreHp: 0.5 } },
+  { id: 'risk_3', name: '궁극기 충전 +50% / 기본공격 -30%', description: '궁극기 특화', apply: { ultCharge: 1.5, coreDamage: 0.7 } },
+  { id: 'risk_4', name: '모든 보상 +100% / 히든 적 확률 증가', description: '고위험 성장', apply: { reward: 2.0, coreHp: 0.8 } },
+] as const;
+
+export const TITLE_DEFS = [
+  { id: '첫 방어자', condition: '보스 1회 처치' },
+  { id: '불굴의 핵', condition: '체력 1% 생존 1회' },
+  { id: '탐욕의 생존자', condition: '위험 보상 3회 이상 선택' },
+  { id: '침묵의 수호자', condition: '궁극기 없이 보스 처치' },
+  { id: '블랙홀의 주인', condition: '블랙홀 처치 누적' },
+  { id: '드론 지휘관', condition: '드론 처치 누적' },
+  { id: '성채의 심장', condition: '방어 코어 고웨이브' },
+  { id: '오메가 도전자', condition: '오메가 시험 진입' },
+  { id: '공허를 본 자', condition: '공허 감시자 조우' },
+  { id: '히든 사냥꾼', condition: '히든 코어 3종 해금' },
+] as const;
+
+export const TITLE_EFFECTS: Record<string, { desc: string; attack?: number; hp?: number; coin?: number; gravity?: number; drone?: number; shield?: number; mastery?: number; artifact?: number }> = {
+  '첫 방어자': { desc: '작은 공격력 보너스', attack: 1.03 },
+  '불굴의 핵': { desc: '작은 체력 보너스', hp: 1.05 },
+  '탐욕의 생존자': { desc: '코인 보너스', coin: 1.08 },
+  '침묵의 수호자': { desc: '기본 공격 보너스', attack: 1.06 },
+  '블랙홀의 주인': { desc: '중력 보너스', gravity: 1.2 },
+  '드론 지휘관': { desc: '드론 보너스', drone: 1.12 },
+  '성채의 심장': { desc: '보호막 보너스', shield: 1.12 },
+  '오메가 도전자': { desc: '마스터리 보너스', mastery: 1.12 },
+  '공허를 본 자': { desc: '공허 저항/생존 보너스', hp: 1.03 },
+  '히든 사냥꾼': { desc: '유물/보상 보너스', artifact: 1.1 },
+};
+
+export const MASTERY_DEFS = [
+  { id: 'barrage', name: '탄막 마스터리', bonus: '공격속도 증가', stat: 'attackSpeed' },
+  { id: 'explosion', name: '폭발 마스터리', bonus: '폭발 범위 증가', stat: 'explosion' },
+  { id: 'gravity', name: '중력 마스터리', bonus: '블랙홀 범위 증가', stat: 'gravity' },
+  { id: 'barrier', name: '방벽 마스터리', bonus: '보호막 재생 증가', stat: 'shieldRegen' },
+  { id: 'drone', name: '드론 마스터리', bonus: '드론 생성 속도 증가', stat: 'drone' },
+  { id: 'greed', name: '탐욕 마스터리', bonus: '웨이브 보상 증가', stat: 'reward' },
+  { id: 'time', name: '시간 마스터리', bonus: '쿨다운 감소', stat: 'ult' },
+  { id: 'void', name: '공허 마스터리', bonus: '처형 확률 증가', stat: 'execute' },
+  { id: 'flame', name: '화염 마스터리', bonus: '화염 피해 증가', stat: 'burn' },
+  { id: 'frost', name: '냉각 마스터리', bonus: '빙결 확률 증가', stat: 'freeze' },
+  { id: 'reflect', name: '반사 마스터리', bonus: '반사 효율 증가', stat: 'reflect' },
+  { id: 'summon', name: '소환 마스터리', bonus: '소환체 피해 증가', stat: 'summon' },
+] as const;
+
+export const PRESTIGE_UPGRADES = [
+  { id: 'global_reward', name: '전역 보상 배율', max: 20, cost: 1, desc: '모든 런 보상 증가' },
+  { id: 'core_memory', name: '코어 기억', max: 10, cost: 1, desc: '선택 코어 성장 일부 보존' },
+  { id: 'clue_boost', name: '히든 단서 강화', max: 10, cost: 1, desc: '단서 발견 조건 완화' },
+  { id: 'artifact_slot', name: '초월 유물 슬롯', max: 5, cost: 2, desc: '런 유물 슬롯 확장' },
+  { id: 'automation', name: '고급 자동화', max: 10, cost: 1, desc: '시작 자원 및 자동 성장 강화' },
+  { id: 'evolution_slot', name: '코어 진화 슬롯', max: 5, cost: 2, desc: '진화 선택지 확장' },
+  { id: 'omega_research', name: '오메가 연구', max: 1, cost: 5, desc: '최종 계열 해금 지원' },
+] as const;
+
+export type MissionCategory = 'DAILY' | 'WEEKLY' | 'CORE' | 'EVOLUTION' | 'HIDDEN' | 'BOSS' | 'CHALLENGE' | 'CHAIN' | 'MASTERY' | 'TITLE';
+export type MissionMetric =
+  | 'total_kills'
+  | 'boss_kills'
+  | 'ult_uses'
+  | 'best_wave'
+  | 'gold_enemy_kills'
+  | 'risk_choices'
+  | 'econ_upgrades_purchased'
+  | 'blackhole_kills'
+  | 'time_stop_boss_kills'
+  | 'drone_damage_total'
+  | 'reflect_damage_total'
+  | 'frozen_kills'
+  | 'mystery_solves'
+  | 'evo_selects'
+  | 'omega_trial_clear'
+  | 'near_death_survive';
+
+export interface MissionDef {
+  id: string;
+  category: MissionCategory;
+  label: string;
+  metric: MissionMetric;
+  target: number;
+  reward: number;
+  rewardType: 'CREDIT' | 'ALLOY' | 'DATA' | 'CORE_XP' | 'ARTIFACT_SHARD';
+  recommendedBuild?: string;
+}
+
+export const MISSION_DEFS: MissionDef[] = [
+  { id: 'daily_kill_5000', category: 'DAILY', label: '적 5,000마리 처치', metric: 'total_kills', target: 5000, reward: 300, rewardType: 'ALLOY' },
+  { id: 'daily_boss_3', category: 'DAILY', label: '보스 3마리 처치', metric: 'boss_kills', target: 3, reward: 280, rewardType: 'DATA' },
+  { id: 'daily_ult_10', category: 'DAILY', label: '궁극기 10회 사용', metric: 'ult_uses', target: 10, reward: 240, rewardType: 'CORE_XP' },
+  { id: 'daily_wave_100', category: 'DAILY', label: '웨이브 100 도달', metric: 'best_wave', target: 100, reward: 380, rewardType: 'CREDIT' },
+  { id: 'daily_gold_3', category: 'DAILY', label: '황금 적 3마리 처치', metric: 'gold_enemy_kills', target: 3, reward: 260, rewardType: 'ARTIFACT_SHARD' },
+  { id: 'daily_risk_1', category: 'DAILY', label: '위험 보상 1회 선택', metric: 'risk_choices', target: 1, reward: 180, rewardType: 'CREDIT' },
+
+  { id: 'weekly_blackhole_300', category: 'WEEKLY', label: '블랙홀로 적 300마리 처치', metric: 'blackhole_kills', target: 300, reward: 900, rewardType: 'DATA', recommendedBuild: '중력 빌드' },
+  { id: 'weekly_drone_boss', category: 'WEEKLY', label: '드론 피해 누적 800 달성', metric: 'drone_damage_total', target: 800, reward: 820, rewardType: 'CORE_XP', recommendedBuild: '드론 빌드' },
+  { id: 'weekly_econ_50', category: 'WEEKLY', label: '경제 업그레이드 50회 선택', metric: 'econ_upgrades_purchased', target: 50, reward: 850, rewardType: 'CREDIT', recommendedBuild: '탐욕 빌드' },
+  { id: 'weekly_no_ult_time', category: 'WEEKLY', label: '시간정지 보스 처치 2회', metric: 'time_stop_boss_kills', target: 2, reward: 900, rewardType: 'DATA', recommendedBuild: '시간 빌드' },
+  { id: 'weekly_reflect_2000', category: 'WEEKLY', label: '반사 피해 2,000 누적', metric: 'reflect_damage_total', target: 2000, reward: 800, rewardType: 'CREDIT', recommendedBuild: '반사 빌드' },
+  { id: 'weekly_freeze_1000', category: 'WEEKLY', label: '빙결 처치 1,000 누적', metric: 'frozen_kills', target: 1000, reward: 820, rewardType: 'CORE_XP', recommendedBuild: '냉각 빌드' },
+
+  { id: 'core_master_1', category: 'CORE', label: '특정 코어 숙련도 10 달성', metric: 'total_kills', target: 1000, reward: 500, rewardType: 'CORE_XP' },
+  { id: 'evolution_pick_3', category: 'EVOLUTION', label: '진화 선택 3회', metric: 'evo_selects', target: 3, reward: 540, rewardType: 'DATA' },
+  { id: 'hidden_solve_2', category: 'HIDDEN', label: '히든 미스터리 2개 해독', metric: 'mystery_solves', target: 2, reward: 620, rewardType: 'ARTIFACT_SHARD' },
+  { id: 'boss_hunter_25', category: 'BOSS', label: '보스 25마리 처치', metric: 'boss_kills', target: 25, reward: 780, rewardType: 'CREDIT' },
+  { id: 'challenge_omega', category: 'CHALLENGE', label: '오메가 시험 진입', metric: 'omega_trial_clear', target: 1, reward: 880, rewardType: 'DATA' },
+  { id: 'chain_1', category: 'CHAIN', label: '연속 미션 1단계: 적 2,000 처치', metric: 'total_kills', target: 2000, reward: 450, rewardType: 'CREDIT' },
+  { id: 'chain_2', category: 'CHAIN', label: '연속 미션 2단계: 보스 8 처치', metric: 'boss_kills', target: 8, reward: 600, rewardType: 'CREDIT' },
+  { id: 'chain_3', category: 'CHAIN', label: '연속 미션 3단계: 웨이브 120', metric: 'best_wave', target: 120, reward: 900, rewardType: 'ARTIFACT_SHARD' },
+  { id: 'mastery_goal', category: 'MASTERY', label: '마스터리 레벨 총합 30 달성', metric: 'total_kills', target: 3000, reward: 1000, rewardType: 'CORE_XP' },
+  { id: 'title_goal', category: 'TITLE', label: '칭호 업적: 불굴의 핵 달성', metric: 'near_death_survive', target: 1, reward: 500, rewardType: 'DATA' },
+] as const;
+
+export const HIDDEN_CLUES = [
+  { id: 'clue_gravity', name: '이상 중력 신호', hint: '블랙홀·중력 계열 행동이 누적될수록 반응', targetCore: 'singularity-core' },
+  { id: 'clue_silence', name: '침묵한 별의 기록', hint: '궁극기 없이 보스를 처치하면 기록이 선명해짐', targetCore: 'void-core' },
+  { id: 'clue_gold', name: '황금 균열', hint: '경제 선택과 고보상 전투가 반복될수록 단서 강화', targetCore: 'gold_judicator' },
+  { id: 'clue_rewind', name: '되감긴 파편', hint: '시간 정지 계열 플레이가 단서를 활성화', targetCore: 'paradox-core' },
+  { id: 'clue_mirror', name: '거울 흔적', hint: '복제/분신 관련 전투 로그에서 발견', targetCore: 'mirror-core' },
+  { id: 'clue_collapse', name: '붕괴 로그', hint: '저체력 장기 생존과 과열 계열이 조건', targetCore: 'collapse-core' },
+] as const;
+
+export const HIDDEN_MYSTERIES = [
+  { id: 'myst_singularity', name: '특이점 해독', requires: ['clue_gravity', 'clue_rewind'], reward: '특이점 계열 코어 단서 강화' },
+  { id: 'myst_void', name: '공허 해독', requires: ['clue_silence', 'clue_mirror'], reward: '공허/거울 계열 해금 힌트' },
+  { id: 'myst_omega', name: '오메가 해독', requires: ['clue_gold', 'clue_collapse', 'clue_rewind'], reward: '오메가 계열 최종 단서' },
+] as const;
 
 export interface GlobalArtifactDef {
   id: string;
