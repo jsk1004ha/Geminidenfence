@@ -15,7 +15,7 @@ export class GameEngine {
   
   constructor() {}
 
-  update(core: CoreStats, deltaTime: number, wave: number, artifacts: string[], onEnemyKill: (reward: number, isBoss: boolean, byUlt: boolean) => void, onCoreDamage: (dmg: number) => void, onWaveComplete: () => void) {
+  update(core: CoreStats, deltaTime: number, wave: number, artifacts: string[], onEnemyKill: (reward: number, isBoss: boolean, byUlt: boolean, enemy?: Enemy, method?: string) => void, onCoreDamage: (dmg: number) => void, onWaveComplete: () => void) {
     if (this.isUltActive) {
       this.ultTimer -= deltaTime;
       if (this.ultTimer <= 0) {
@@ -34,7 +34,13 @@ export class GameEngine {
     // Artifact: art_7 (중력 억제장)
     const enemiesSpeedMult = artifacts.includes('art_7') ? 0.85 : 1;
     // Artifact: art_6 (모듈 집중 코일)
-    const moduleDamageMult = artifacts.includes('art_6') ? 1.5 : 1;
+    const moduleDamageMult = (artifacts.includes('art_6') ? 1.5 : 1) * (artifacts.includes('ga_20') ? 1.2 : 1);
+    const slowMult = artifacts.includes('ga_8') ? 1.1 : 1;
+    const burnMult = artifacts.includes('ga_9') ? 1.2 : 1;
+    const reflectMult = artifacts.includes('ga_10') ? 1.3 : 1;
+    const statusDurationMult = artifacts.includes('ga_13') ? 1.2 : 1;
+    const summonMult = artifacts.includes('ga_11') ? 1.15 : 1;
+    const blackholePullMult = artifacts.includes('ga_3') ? 1.2 : 1;
 
     // 1. Wave & Spawn Logic
     const isBossWave = wave > 0 && wave % 10 === 0;
@@ -71,7 +77,7 @@ export class GameEngine {
           if (dist < 25) {
             e.hp -= (m.damage * moduleDamageMult) * deltaTime;
             if (e.hp <= 0 && e.maxHp > 0) {
-              onEnemyKill(e.reward, e.type === 'BOSS', false);
+              onEnemyKill(e.reward, e.type === 'BOSS', false, e, 'MODULE');
               e.maxHp = -1; // Mark killed to prevent double rewards
             }
           }
@@ -89,7 +95,8 @@ export class GameEngine {
          this.enemies.forEach(e => {
             const dist = Math.sqrt((mx - e.x)**2 + (my - e.y)**2);
             if (dist < 80) {
-               e.slowTimer = 1.0;
+               e.slowTimer = 1.0 * statusDurationMult;
+               e.slowAmount = Math.max(e.slowAmount || 0, 0.2 * slowMult);
             }
          });
       } else if (m.type === 'DRONE_NEST') {
@@ -97,7 +104,7 @@ export class GameEngine {
          if (m.lastActionTime > 3) {
             this.summons.push({
                id: Math.random().toString(36), type: 'DRONE',
-               x: mx, y: my, damage: m.damage, speed: 2.0, radius: 0, lifeTime: 0, maxLifeTime: 10,
+               x: mx, y: my, damage: m.damage * summonMult, speed: 2.0 * summonMult, radius: 0, lifeTime: 0, maxLifeTime: 10,
                color: m.color, lastAttackTime: 0
             });
             m.lastActionTime = 0;
@@ -106,8 +113,8 @@ export class GameEngine {
          this.enemies.forEach(e => {
             const dist = Math.sqrt((mx - e.x)**2 + (my - e.y)**2);
             if (dist < 60) {
-               e.burnTimer = 2.0;
-               e.burnDamage = m.damage;
+               e.burnTimer = 2.0 * statusDurationMult;
+               e.burnDamage = m.damage * burnMult;
             }
          });
       } else if (m.type === 'SHIELD_SAT') {
@@ -126,7 +133,7 @@ export class GameEngine {
              if (target) {
                 target.hp -= m.damage * moduleDamageMult * 2;
                 if (target.hp <= 0 && target.maxHp > 0) {
-                   onEnemyKill(target.reward, target.type === 'BOSS', false);
+                   onEnemyKill(target.reward, target.type === 'BOSS', false, target, 'MODULE');
                    target.maxHp = -1;
                 }
              }
@@ -158,7 +165,7 @@ export class GameEngine {
             const dist = Math.sqrt((mx - e.x)**2 + (my - e.y)**2);
             if (dist < 120 && e.hp > 0 && e.hp < e.maxHp * 0.15 && e.type !== 'BOSS') {
                e.hp = -1; // Execute
-               onEnemyKill(e.reward, false, false);
+               onEnemyKill(e.reward, false, false, e, 'EXECUTE');
             }
          });
       } else if (m.type === 'PURIFY_COIL') {
@@ -247,7 +254,7 @@ export class GameEngine {
       }
 
       // Illusion mechanics
-      if (enemy.type === 'ILLUSION') {
+      if (enemy.type === 'ILLUSION' || enemy.type === 'AFTERIMAGE' || enemy.type === 'BOSS_CLONE_AIDE') {
          enemy.illusionTimer = (enemy.illusionTimer || 0) + deltaTime;
          if (enemy.illusionTimer > 7 && this.enemies.length < 50) {
             // Spawn clone
@@ -286,15 +293,18 @@ export class GameEngine {
       
       if (dist > 35) {
         // Ranged enemies
-        const isRanged = enemy.type === 'SHOOTER' || enemy.type === 'SNIPER' || enemy.type === 'JAMMER';
-        const range = enemy.type === 'SNIPER' ? 350 : 200;
+        const rangedTypes = new Set([
+          'SHOOTER','SNIPER','JAMMER','MORTAR','ELECTROMANCER','POISON_SNIPER','FROST_SNIPER','CURSE_CASTER','VOID_SNIPER','SPLIT_ARTILLERY','SUPPORT_GUNNER'
+        ]);
+        const isRanged = rangedTypes.has(enemy.type);
+        const range = enemy.type === 'SNIPER' ? 350 : (enemy.type === 'MORTAR' ? 300 : 220);
 
         if (isRanged && dist < range) {
            enemy.shootTimer = (enemy.shootTimer || 0) + deltaTime * 1000;
-           const shootInterval = enemy.type === 'SNIPER' ? 4000 : 2000;
-           if (enemy.shootTimer > shootInterval) {
-              const projDmg = enemy.type === 'SNIPER' ? enemy.damage * 3 : enemy.damage;
-              const projColor = enemy.type === 'JAMMER' ? '#A855F7' : '#FF4D00';
+              const shootInterval = enemy.type === 'SNIPER' ? 4000 : (enemy.type === 'MORTAR' ? 3000 : 2000);
+              if (enemy.shootTimer > shootInterval) {
+              const projDmg = enemy.type === 'SNIPER' ? enemy.damage * 3 : (enemy.type === 'MORTAR' ? enemy.damage * 2 : enemy.damage);
+              const projColor = enemy.type === 'JAMMER' || enemy.type === 'CURSE_CASTER' ? '#A855F7' : '#FF4D00';
               this.projectiles.push({
                 id: Math.random().toString(36),
                 x: enemy.x, y: enemy.y, targetId: 'CORE',
@@ -343,6 +353,7 @@ export class GameEngine {
              enemy.x += (dx / dist) * enemy.speed * deltaTime * 60 * speedMult;
              enemy.y += (dy / dist) * enemy.speed * deltaTime * 60 * speedMult;
           }
+          if (enemy.prefix === '분노한' && enemy.hp < enemy.maxHp * 0.5) enemy.speed *= 1.001;
         }
       } else {
         // Hit Core
@@ -358,7 +369,11 @@ export class GameEngine {
            // REFLECTOR Module
            const reflectorCount = this.modules.filter(m => m.type === 'REFLECTOR').length;
            if (reflectorCount > 0) {
-              enemy.hp -= actualDmg * reflectorCount * 2;
+              enemy.hp -= actualDmg * reflectorCount * 2 * reflectMult;
+              if (enemy.hp <= 0 && enemy.maxHp > 0) {
+                onEnemyKill(enemy.reward, enemy.type === 'BOSS', false, enemy, 'REFLECT');
+                enemy.maxHp = -1;
+              }
            }
 
            // ABSORPTION_RING Module
@@ -367,6 +382,9 @@ export class GameEngine {
               core.hp = Math.min(core.maxHp, core.hp + absorbCount * 2);
            }
 
+           if (enemy.type === 'BACKFLOW') {
+             onCoreDamage(2);
+           }
            if (!enemy.isBoss && enemy.type !== 'BOSS') {
              enemy.hp = 0;
            } else {
@@ -381,6 +399,32 @@ export class GameEngine {
     // Clean up dead enemies, award points if ult killed them
     this.enemies = this.enemies.filter(e => {
        if (e.hp <= 0 && e.maxHp > 0) {
+         if ((e.prefix === '분열하는' || ['EGG_SACK','SPLITTER','ARMORED_SPIDER'].includes(e.type)) && this.enemies.length < 120) {
+           for (let i = 0; i < 2; i++) {
+             this.enemies.push({
+               id: Math.random().toString(36),
+               type: 'SWARM',
+               name: 'SWARM',
+               isBoss: false,
+               x: e.x + (Math.random() - 0.5) * 30,
+               y: e.y + (Math.random() - 0.5) * 30,
+               hp: Math.max(2, e.maxHp * 0.2),
+               maxHp: Math.max(2, e.maxHp * 0.2),
+               speed: 1.3,
+               damage: Math.max(1, e.damage * 0.5),
+               reward: Math.max(0, Math.floor(e.reward * 0.3)),
+               angle: 0,
+               radius: 5,
+               defense: 0
+             });
+           }
+         }
+         if (e.prefix === '화염의') {
+           this.enemies.forEach(n => {
+             const dist = Math.sqrt((n.x - e.x) ** 2 + (n.y - e.y) ** 2);
+             if (dist < 80) n.hp -= e.maxHp * 0.1;
+           });
+         }
          // Fragment core spawn feature
          if (core.id.includes('frag-core')) {
            for (let i=0; i<3; i++) {
@@ -404,7 +448,8 @@ export class GameEngine {
            }
          }
 
-         onEnemyKill(e.reward, e.type === 'BOSS', this.isUltActive);
+         const method = this.isUltActive ? 'ULT' : (e.burnTimer && e.burnTimer > 0 ? 'BURN' : 'PROJECTILE');
+         onEnemyKill(e.reward, e.type === 'BOSS', this.isUltActive, e, method);
          return false;
        }
        return e.hp > 0;
@@ -441,6 +486,10 @@ export class GameEngine {
                s.lastAttackTime += deltaTime * 1000;
                if (s.lastAttackTime > (s.type === 'NANOBOT' ? 500 : 1000)) {
                   target.hp -= s.damage;
+                  if (target.hp <= 0 && target.maxHp > 0) {
+                    onEnemyKill(target.reward, target.type === 'BOSS', false, target, 'SUMMON');
+                    target.maxHp = -1;
+                  }
                   s.lastAttackTime = 0;
                }
             } else {
@@ -471,8 +520,8 @@ export class GameEngine {
                   if (Math.abs(e.x - s.x) < 40) { e.hp -= s.damage * deltaTime; }
               } else if (dist < r) {
                  if (s.type === 'BLACKHOLE') {
-                    e.x -= (e.x - s.x) * 2 * deltaTime;
-                    e.y -= (e.y - s.y) * 2 * deltaTime;
+                    e.x -= (e.x - s.x) * 2 * blackholePullMult * deltaTime;
+                    e.y -= (e.y - s.y) * 2 * blackholePullMult * deltaTime;
                  }
                  e.hp -= s.damage * deltaTime;
               }
@@ -562,6 +611,9 @@ export class GameEngine {
               if (actualDmg > 0) {
                  if (target.vulnTimer && target.vulnTimer > 0) actualDmg *= 1.5;
                  target.hp -= actualDmg;
+                 if (target.reflect && target.reflect > 0) {
+                    onCoreDamage(Math.max(1, actualDmg * target.reflect * 0.2));
+                 }
               }
               
               if (p.hitSet) p.hitSet.add(target.id);
@@ -806,34 +858,69 @@ export class GameEngine {
     let baseSpd = 0.05 + Math.random() * 0.03;
     let baseDmg = 5 + Math.floor(wave / 3);
     let reward = Math.floor(1 + wave / 5);
-    
-    // Type selection based on wave unlocks
-    const typesByTier = [
-       // Tier 0 (Wave 1+)
-       [{ t: 'WALKER', h: 1, s: 1, d: 1 }, { t: 'RUNNER', h: 0.5, s: 1.5, d: 0.5 }, { t: 'CRAWLER', h: 0.5, s: 0.4, d: 0.5 }],
-       // Tier 1 (Wave 5+)
-       [{ t: 'TANKER', h: 4, s: 0.5, d: 2 }, { t: 'SHOOTER', h: 1, s: 0.6, d: 1.5 }, { t: 'SPRINTER', h: 0.3, s: 2.0, d: 0.5 }, { t: 'STONEBACK', h: 2, s: 0.5, d: 1 }],
-       // Tier 2 (Wave 10+)
-       [{ t: 'SWARM', h: 0.3, s: 1.8, d: 0.3 }, { t: 'CHARGER', h: 1.5, s: 0.8, d: 1.5 }, { t: 'SLASHER', h: 1, s: 1.2, d: 3 }, { t: 'SKIMMER', h: 0.8, s: 1.5, d: 1 }],
-       // Tier 3 (Wave 15+)
-       [{ t: 'BRUTE', h: 3, s: 0.8, d: 3 }, { t: 'ARMORED', h: 2, s: 0.5, d: 1 }, { t: 'DASHER', h: 1, s: 0.8, d: 1 }, { t: 'EVADER', h: 0.8, s: 1.3, d: 1 }],
-       // Tier 4 (Wave 20+)
-       [{ t: 'SHIELDER', h: 1.5, s: 0.7, d: 1 }, { t: 'GHOST', h: 0.8, s: 1.1, d: 0.8 }, { t: 'PHASE', h: 0.6, s: 1.5, d: 1 }, { t: 'NEEDLE', h: 0.5, s: 2.2, d: 2 }],
-       // Tier 5 (Wave 25+)
-       [{ t: 'NEST', h: 3, s: 0.2, d: 0 }, { t: 'BLINKER', h: 0.8, s: 1.0, d: 1 }, { t: 'LIGHTNING_BUG', h: 0.4, s: 2.5, d: 0.5 }, { t: 'ILLUSION', h: 1.0, s: 1.0, d: 1 }],
-       // Tier 6 (Wave 30+)
-       [{ t: 'JAMMER', h: 1.5, s: 0.5, d: 1 }, { t: 'THIEF', h: 0.8, s: 2.0, d: 0.5 }, { t: 'GOLD_SLIME', h: 10, s: 1.2, d: 0 }]
+    const enemyCatalog = [
+      { t: 'WALKER', w: 1, h: 1, s: 1, d: 1 }, { t: 'RUNNER', w: 1, h: 0.55, s: 1.5, d: 0.6 }, { t: 'CRAWLER', w: 1, h: 0.8, s: 0.7, d: 0.8 },
+      { t: 'TANKER', w: 4, h: 3.8, s: 0.55, d: 1.7 }, { t: 'SWARM', w: 6, h: 0.35, s: 1.8, d: 0.3 }, { t: 'BRUTE', w: 10, h: 2.8, s: 0.9, d: 2.3 },
+      { t: 'CHARGER', w: 10, h: 1.5, s: 0.9, d: 1.8 }, { t: 'SLASHER', w: 10, h: 1.2, s: 1.2, d: 2.5 }, { t: 'VULTURE', w: 12, h: 1.1, s: 1.3, d: 1.6 },
+      { t: 'STONEBACK', w: 8, h: 2.1, s: 0.6, d: 1.1 }, { t: 'SPRINTER', w: 8, h: 0.35, s: 2.2, d: 0.5 }, { t: 'BLINKER', w: 15, h: 0.9, s: 1.1, d: 1.0 },
+      { t: 'SKIMMER', w: 12, h: 0.85, s: 1.6, d: 1.1 }, { t: 'DASHER', w: 15, h: 1.0, s: 1.1, d: 1.2 }, { t: 'GHOST', w: 18, h: 0.8, s: 1.1, d: 1.0 },
+      { t: 'EVADER', w: 15, h: 0.8, s: 1.2, d: 1.1 }, { t: 'PHASE', w: 20, h: 0.7, s: 1.5, d: 1.1 }, { t: 'NEEDLE', w: 18, h: 0.5, s: 2.3, d: 1.8 },
+      { t: 'LIGHTNING_BUG', w: 22, h: 0.45, s: 2.5, d: 0.7 }, { t: 'ILLUSION', w: 25, h: 1.0, s: 1.0, d: 1.0 },
+      { t: 'ARMORED', w: 14, h: 2.2, s: 0.55, d: 1.1 }, { t: 'SHIELDER', w: 16, h: 1.6, s: 0.7, d: 1.0 }, { t: 'IRON_BEETLE', w: 20, h: 2.5, s: 0.45, d: 1.3 },
+      { t: 'CRYSTAL', w: 22, h: 1.8, s: 0.7, d: 1.1 }, { t: 'REGENERATOR', w: 24, h: 1.6, s: 0.8, d: 1.0 }, { t: 'BARRIER_GUARD', w: 25, h: 1.5, s: 0.8, d: 1.0 },
+      { t: 'FORTRESS_BUG', w: 28, h: 3.0, s: 0.35, d: 1.2 }, { t: 'ARMORED_SPIDER', w: 30, h: 2.2, s: 0.7, d: 1.4 },
+      { t: 'SHOOTER', w: 8, h: 1.0, s: 0.7, d: 1.4 }, { t: 'SNIPER', w: 15, h: 0.9, s: 0.55, d: 2.0 }, { t: 'MORTAR', w: 20, h: 1.2, s: 0.5, d: 2.2 },
+      { t: 'ELECTROMANCER', w: 20, h: 1.2, s: 0.7, d: 1.3 }, { t: 'POISON_SNIPER', w: 22, h: 1.1, s: 0.6, d: 1.3 }, { t: 'FROST_SNIPER', w: 24, h: 1.1, s: 0.6, d: 1.3 },
+      { t: 'CURSE_CASTER', w: 26, h: 1.1, s: 0.6, d: 1.1 }, { t: 'VOID_SNIPER', w: 28, h: 1.1, s: 0.6, d: 1.8 }, { t: 'SPLIT_ARTILLERY', w: 30, h: 1.3, s: 0.55, d: 1.8 },
+      { t: 'SUPPORT_GUNNER', w: 30, h: 1.2, s: 0.7, d: 0.9 },
+      { t: 'EGG_SACK', w: 16, h: 1.5, s: 0.5, d: 0.8 }, { t: 'NEST', w: 25, h: 3.0, s: 0.2, d: 0.5 }, { t: 'HIVE_MOTHER', w: 28, h: 2.3, s: 0.5, d: 1.2 },
+      { t: 'SPLITTER', w: 24, h: 1.6, s: 0.8, d: 1.0 }, { t: 'PARASITE', w: 27, h: 0.9, s: 1.2, d: 1.2 }, { t: 'HATCHER', w: 30, h: 1.5, s: 0.7, d: 1.1 },
+      { t: 'SPORE', w: 30, h: 1.2, s: 0.8, d: 1.0 }, { t: 'SWARM_MAGE', w: 34, h: 1.4, s: 0.7, d: 1.0 }, { t: 'MULTIPLIER', w: 36, h: 2.0, s: 0.6, d: 1.1 },
+      { t: 'RIFT_BROODER', w: 38, h: 1.8, s: 0.6, d: 1.2 },
+      { t: 'JAMMER', w: 20, h: 1.5, s: 0.5, d: 1.1 }, { t: 'HACKER', w: 24, h: 1.1, s: 0.8, d: 1.0 }, { t: 'SLOW_CASTER', w: 24, h: 1.2, s: 0.7, d: 1.0 },
+      { t: 'SILENCER', w: 27, h: 1.3, s: 0.7, d: 1.0 }, { t: 'ABSORBER', w: 30, h: 1.5, s: 0.6, d: 1.1 }, { t: 'CORROSIVE', w: 30, h: 1.3, s: 0.7, d: 1.2 },
+      { t: 'DISTORTER', w: 33, h: 1.4, s: 0.7, d: 1.0 }, { t: 'DISTRIBUTOR', w: 35, h: 1.6, s: 0.7, d: 1.0 }, { t: 'CLOAKER', w: 36, h: 1.2, s: 0.8, d: 1.0 },
+      { t: 'BACKFLOW', w: 36, h: 1.3, s: 0.8, d: 1.3 },
+      { t: 'THIEF', w: 30, h: 0.9, s: 2.0, d: 0.5 }, { t: 'TAX_COLLECTOR', w: 35, h: 1.2, s: 0.8, d: 1.0 }, { t: 'GREED_BUG', w: 35, h: 1.3, s: 0.9, d: 1.1 },
+      { t: 'VAULT_BEAST', w: 36, h: 4.5, s: 0.4, d: 2.0 }, { t: 'FAKE_TREASURE', w: 38, h: 1.2, s: 0.9, d: 1.0 }, { t: 'DEBTOR', w: 40, h: 1.4, s: 0.8, d: 1.2 },
+      { t: 'GOLD_SLIME', w: 32, h: 10, s: 1.2, d: 0 }, { t: 'REWARD_PREDATOR', w: 42, h: 1.6, s: 0.7, d: 1.2 }, { t: 'TRIBUTE_COLLECTOR', w: 42, h: 1.8, s: 0.7, d: 1.3 },
+      // Additional spec-complete variants (aliases / boss aides / elemental set)
+      { t: 'AFTERIMAGE', w: 24, h: 0.9, s: 1.6, d: 1.1 }, { t: 'SHELL_BEAST', w: 26, h: 2.0, s: 0.6, d: 1.2 },
+      { t: 'FORCE_FIELD', w: 28, h: 1.9, s: 0.7, d: 1.1 }, { t: 'HEAVY_ARMOR_SPIDER', w: 30, h: 2.2, s: 0.7, d: 1.4 },
+      { t: 'MIMIC_TREASURE', w: 38, h: 1.2, s: 1.0, d: 1.0 }, { t: 'MINING_SABOTEUR', w: 40, h: 1.3, s: 0.8, d: 1.1 },
+      { t: 'OFFERING_COLLECTOR', w: 42, h: 1.9, s: 0.7, d: 1.3 },
+      { t: 'BOSS_SHIELD_AIDE', w: 30, h: 1.5, s: 0.8, d: 0.8 }, { t: 'BOSS_HEAL_AIDE', w: 30, h: 1.3, s: 0.9, d: 0.8 },
+      { t: 'BOSS_RAGE_AIDE', w: 32, h: 1.4, s: 0.9, d: 1.0 }, { t: 'BOSS_SPEED_AIDE', w: 32, h: 1.2, s: 1.2, d: 0.8 },
+      { t: 'BOSS_RIFT_AIDE', w: 34, h: 1.4, s: 0.8, d: 1.0 }, { t: 'BOSS_SILENCE_AIDE', w: 34, h: 1.3, s: 0.9, d: 1.0 },
+      { t: 'BOSS_RESONANCE_AIDE', w: 36, h: 1.5, s: 0.8, d: 1.1 }, { t: 'BOSS_VOID_AIDE', w: 36, h: 1.4, s: 0.9, d: 1.1 },
+      { t: 'BOSS_SACRIFICE_AIDE', w: 38, h: 1.5, s: 0.8, d: 1.1 }, { t: 'BOSS_CLONE_AIDE', w: 38, h: 1.4, s: 0.9, d: 1.0 },
+      { t: 'FLAME_ELEMENTAL', w: 24, h: 1.1, s: 1.0, d: 1.1 }, { t: 'FROST_ELEMENTAL', w: 24, h: 1.1, s: 0.9, d: 1.1 },
+      { t: 'LIGHTNING_ELEMENTAL', w: 26, h: 1.0, s: 1.2, d: 1.1 }, { t: 'DARK_ELEMENTAL', w: 26, h: 1.2, s: 1.0, d: 1.2 },
+      { t: 'LIGHT_ELEMENTAL', w: 28, h: 1.2, s: 1.0, d: 1.2 }, { t: 'TOXIC_ELEMENTAL', w: 28, h: 1.1, s: 1.0, d: 1.1 },
+      { t: 'METAL_ELEMENTAL', w: 30, h: 1.8, s: 0.7, d: 1.2 }, { t: 'GHOST_ELEMENTAL', w: 30, h: 1.0, s: 1.1, d: 1.0 },
+      { t: 'VOID_ELEMENTAL', w: 32, h: 1.4, s: 0.9, d: 1.3 }, { t: 'NEBULA_ELEMENTAL', w: 34, h: 1.5, s: 1.0, d: 1.3 },
+      // Canonical names requested in the spec
+      { t: 'GHOST_RUNNER', w: 18, h: 0.8, s: 1.1, d: 1.0 }, { t: 'PHASE_BUG', w: 20, h: 0.7, s: 1.5, d: 1.1 },
+      { t: 'SHIELD_BEARER', w: 16, h: 1.6, s: 0.7, d: 1.0 }, { t: 'IRONCLAD_BUG', w: 20, h: 2.5, s: 0.45, d: 1.3 },
+      { t: 'FORTRESS_WORM', w: 28, h: 3.0, s: 0.35, d: 1.2 }, { t: 'HEAVY_ARMORED_SPIDER', w: 30, h: 2.2, s: 0.7, d: 1.4 },
+      { t: 'NEST_MONSTER', w: 25, h: 3.0, s: 0.2, d: 0.5 }, { t: 'SWARM_SUMMONER', w: 34, h: 1.4, s: 0.7, d: 1.0 },
+      { t: 'RIFT_SCATTERER', w: 38, h: 1.8, s: 0.6, d: 1.2 }, { t: 'THIEF_RAT', w: 30, h: 0.9, s: 2.0, d: 0.5 }
     ];
-
-    let availablePool: any[] = [];
-    for(let i=0; i<typesByTier.length; i++) {
-        if (wave >= i * 5 || i === 0) {
-           availablePool.push(...typesByTier[i]);
-        }
-    }
-    
-    // Fallback logic to pick a random type
-    const picked = availablePool[Math.floor(Math.random() * availablePool.length)];
+    const hiddenPool = [
+      { t: 'VOID_WATCHER', cond: !this.usedUltThisWave && wave >= 35, h: 2.2, s: 1.2, d: 1.5 },
+      { t: 'TIME_RELIC', cond: core.id.includes('time') && wave >= 30, h: 1.8, s: 1.1, d: 1.3 },
+      { t: 'GRAVITY_DEVOURER', cond: core.id.includes('gravity') && wave >= 30, h: 2.0, s: 1.0, d: 1.4 },
+      { t: 'GOLD_WRAITH', cond: core.type === 'ECONOMIC' && wave >= 30, h: 1.5, s: 2.0, d: 1.0 },
+      { t: 'SILENT_STAR', cond: core.id.includes('silence') && wave >= 35, h: 2.0, s: 1.0, d: 1.6 },
+      { t: 'MIRROR_HUNTER', cond: core.id.includes('copy') && wave >= 35, h: 1.8, s: 1.2, d: 1.4 },
+      { t: 'COLLAPSE_BEAST', cond: core.id.includes('overheat') && wave >= 35, h: 2.2, s: 1.0, d: 1.8 },
+      { t: 'NAMELESS_SHADOW', cond: core.id.includes('nameless') && wave >= 35, h: 2.0, s: 1.1, d: 1.5 },
+      { t: 'ABYSS_EYE', cond: wave >= 45, h: 2.4, s: 1.0, d: 1.8 },
+      { t: 'OMEGA_SHARD', cond: core.id.includes('omega') && wave >= 45, h: 2.5, s: 1.0, d: 2.0 }
+    ];
+    let availablePool: any[] = enemyCatalog.filter(e => wave >= e.w);
+    hiddenPool.filter(h => h.cond).forEach(h => { if (Math.random() < 0.04) availablePool.push(h); });
+    const picked = availablePool[Math.floor(Math.random() * availablePool.length)] || enemyCatalog[0];
     let type = picked.t;
     let hpMult = picked.h;
     let spdMult = picked.s;
@@ -849,9 +936,9 @@ export class GameEngine {
     let evasion = 0; let regen = 0; let reflect = 0;
 
     // Elite generation
-    if (wave > 15 && Math.random() < 0.1) {
+    if (wave > 15 && Math.random() < 0.14) {
        isElite = true;
-       const prefixes = ['거대한', '재빠른', '무장한', '황금의', '재생하는', '회피하는'];
+       const prefixes = ['거대한','재빠른','분열하는','반사하는','재생하는','무장한','은폐한','분노한','흡수하는','저주받은','황금의','공허의','빙결의','화염의','전격의','심연의','복제하는','도망치는','봉쇄하는','오메가'];
        prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
        
        if (prefix === '거대한') { finalHp *= 3; finalSpd *= 0.8; }
@@ -859,11 +946,21 @@ export class GameEngine {
        if (prefix === '무장한') { defense = Math.floor(wave / 2); finalHp *= 1.5; }
        if (prefix === '황금의') { reward *= 5; finalHp *= 2; }
        if (prefix === '재생하는') { regen = finalHp * 0.05; }
-       if (prefix === '회피하는') { evasion = 0.3; }
+       if (prefix === '은폐한') { evasion = 0.3; }
+       if (prefix === '반사하는') { reflect = 0.25; }
+       if (prefix === '저주받은') { finalDmg *= 1.3; }
+       if (prefix === '빙결의') { finalSpd *= 0.9; }
+       if (prefix === '전격의') { finalSpd *= 1.3; defense += Math.floor(wave / 3); }
+       if (prefix === '심연의') { finalHp *= 1.8; finalDmg *= 1.5; }
+       if (prefix === '오메가') { finalHp *= 2.2; finalDmg *= 1.8; defense += Math.floor(wave / 2); evasion = 0.2; regen = finalHp * 0.03; }
     }
 
-    if (type === 'ARMORED') defense += Math.floor(wave / 3);
+    if (['ARMORED','IRON_BEETLE','FORTRESS_BUG','VAULT_BEAST','TRIBUTE_COLLECTOR'].includes(type)) defense += Math.floor(wave / 3);
     if (type === 'SHIELDER') { maxShield = finalHp; shield = finalHp; }
+    if (['BARRIER_GUARD','VOID_WATCHER','OMEGA_SHARD'].includes(type)) { maxShield = finalHp * 0.8; shield = maxShield; }
+    if (['EVADER','GHOST','CLOAKER'].includes(type)) evasion = Math.max(evasion, 0.2);
+    if (['REGENERATOR','HIVE_MOTHER'].includes(type)) regen = Math.max(regen, finalHp * 0.02);
+    if (type === 'CRYSTAL') reflect = Math.max(reflect, 0.2);
     if (type === 'GOLD_SLIME') { reward *= 10; }
     
     // Economic core features
