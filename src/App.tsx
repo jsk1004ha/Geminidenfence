@@ -40,6 +40,7 @@ const HIDDEN_CORE_REQUIREMENTS: Record<string, (state: GameState) => boolean> = 
 export default function App() {
   const [gameState, setGameState] = useState<GameState>(INITIAL_GAME_STATE);
   const [core, setCore] = useState<CoreStats>(CORE_TEMPLATES[INITIAL_GAME_STATE.activeCoreId]);
+  const [gameSpeed, setGameSpeed] = useState<number>(1);
   const [engineState, setEngineState] = useState<{enemies: number, ultActive: boolean, activeUltName: string | null}>({ enemies: 0, ultActive: false, activeUltName: null });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine>(new GameEngine());
@@ -267,6 +268,7 @@ export default function App() {
     
     setCore(applyRunPreset(applyGlobalUpgrades(CORE_TEMPLATES[selectedCoreId]), gameState.selectedChallenge));
     engineRef.current = new GameEngine();
+    setGameSpeed(1);
   };
 
   const unlockArtifact = (artId: string) => {
@@ -786,16 +788,17 @@ export default function App() {
   const animate = (time: number) => {
     if (lastTimeRef.current !== 0 && !gameState.isPaused && gameState.gameStatus === 'PLAYING' && !gameState.pendingArtifact && !gameState.pendingEvolution && !gameState.pendingRiskChoice) {
       const deltaTime = (time - lastTimeRef.current) / 1000;
+      const simDeltaTime = Math.min(deltaTime * gameSpeed, 0.4);
       const ctx = canvasRef.current?.getContext('2d');
       if (ctx) {
-        engineRef.current.update(core, Math.min(deltaTime, 0.1), gameState.wave, [...gameState.artifacts, ...gameState.globalArtifacts], handleEnemyKill, handleCoreDamage, handleWaveComplete);
+        engineRef.current.update(core, simDeltaTime, gameState.wave, [...gameState.artifacts, ...gameState.globalArtifacts], handleEnemyKill, handleCoreDamage, handleWaveComplete);
         engineRef.current.render(ctx, core);
         if (core.hp > 0 && core.hp <= core.maxHp * 0.2) {
           setGameState(prev => ({
             ...prev,
             achievements: {
               ...prev.achievements,
-              low_hp_seconds: (prev.achievements.low_hp_seconds || 0) + Math.min(deltaTime, 0.1)
+              low_hp_seconds: (prev.achievements.low_hp_seconds || 0) + simDeltaTime
             }
           }));
         }
@@ -825,7 +828,7 @@ export default function App() {
   useEffect(() => {
     requestRef.current = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(requestRef.current);
-  }, [gameState.isPaused, gameState.gameStatus, gameState.pendingArtifact, gameState.pendingEvolution, gameState.pendingRiskChoice, core, gameState.ultCharge, gameState.artifacts]);
+  }, [gameState.isPaused, gameState.gameStatus, gameState.pendingArtifact, gameState.pendingEvolution, gameState.pendingRiskChoice, core, gameState.ultCharge, gameState.artifacts, gameSpeed]);
 
   const ultPercent = Math.min(100, (gameState.ultCharge / (core.ultMax || 100)) * 100);
 
@@ -1409,6 +1412,22 @@ export default function App() {
                 <button onClick={() => setGameState(p => ({ ...p, isPaused: !p.isPaused }))} className="px-6 bg-[#0A0A0C]/90 backdrop-blur border border-[#2D2D33] text-[#D1D5DB] rounded-sm hover:bg-[#1A1A1E] transition-colors shadow-xl">
                   {gameState.isPaused ? <Play className="w-4 h-4 fill-current" /> : <Pause className="w-4 h-4 fill-current" />}
                 </button>
+
+                <div className="flex items-center gap-1 bg-[#0A0A0C]/90 backdrop-blur border border-[#2D2D33] rounded-sm p-1 shadow-xl">
+                  {[0.5, 1, 2, 4].map(speed => (
+                    <button
+                      key={speed}
+                      onClick={() => setGameSpeed(speed)}
+                      className={`px-2 py-1 text-[10px] font-mono border rounded-sm transition-colors ${
+                        gameSpeed === speed
+                          ? 'bg-[#00F0FF] text-black border-[#00F0FF]'
+                          : 'bg-transparent text-[#9CA3AF] border-[#2D2D33] hover:text-white hover:border-white'
+                      }`}
+                    >
+                      x{speed}
+                    </button>
+                  ))}
+                </div>
              </div>
           )}
         </div>
