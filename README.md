@@ -2,33 +2,52 @@
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
-# Run and deploy your AI Studio app
+# 오비탈 코어: 아이들 타워 디펜스
 
-This contains everything you need to run your app locally.
+중앙 코어 1개를 지키는 방치형 타워 디펜스 프로토타입입니다.
 
-View your app in AI Studio: https://ai.studio/apps/ad0d205b-6f0a-45cd-959c-f16e38357351
+## 로컬 실행
 
-## Run Locally
+**Prerequisites:** Node.js
 
-**Prerequisites:**  Node.js
+1. 의존성 설치
+   - `npm install`
+2. 개발 서버 실행
+   - `npm run dev`
+3. 타입 검사
+   - `npm run lint`
+4. 프로덕션 빌드
+   - `npm run build`
 
+## 구현된 메타 시스템 (2026-04-27 기준)
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+- **도전 모드(Challenge Mode)**
+  - 일반 런 / 보스 러시 / 침묵의 밤 / 엘리트 침공 / 과열 전장 / 탐욕의 시험
+  - 출격(DEPLOY) 탭에서 모드를 선택한 뒤 런 시작.
+- **위험 보상 선택지(Risk/Reward)**
+  - 특정 웨이브마다 리스크 선택 창이 등장하며, 보상 배율과 스탯 페널티를 교환.
+- **미션 시스템 (Daily/Weekly 최소셋)**
+  - META 탭에서 진행도 확인 및 보상 수령.
+- **프레스티지(초월) 1차 루프**
+  - META 탭에서 초월 실행 가능.
+  - 최고 웨이브를 기준으로 초월 포인트를 획득하고 연구를 리셋.
+- **칭호/마스터리**
+  - 10종 칭호(첫 방어자/불굴의 핵/탐욕의 생존자/침묵의 수호자/블랙홀의 주인/드론 지휘관/성채의 심장/오메가 도전자/공허를 본 자/히든 사냥꾼) 해금 및 장착.
+  - 12종 마스터리(탄막/폭발/중력/방벽/드론/탐욕/시간/공허/화염/냉각/반사/소환) XP/레벨/보너스 표시.
+  - 실패 런에서도 마스터리 XP가 누적되며 META 탭에서 실시간 확인 가능.
+- **프레스티지 고도화**
+  - 초월 포인트 투자 트리(전역 보상 배율/코어 기억/히든 단서 강화/초월 유물 슬롯/고급 자동화/진화 슬롯/오메가 연구) 지원.
+- **미션 시스템 고도화**
+  - 일일/주간/코어/진화/히든/보스/도전/연속/마스터리/칭호 미션을 카테고리 기반으로 제공.
+  - 연속 미션은 단계 잠금 해제 방식으로 진행되며, 권장 빌드와 보상 타입(CREDIT/ALLOY/DATA/CORE_XP/ARTIFACT_SHARD)을 함께 표시.
+  - 일일 미션은 날짜 기준 자동 리프레시.
+- **보스 개별 AI 패턴**
+  - 일반/고급/히든 보스를 별도 카탈로그로 분리.
+  - 보스별 고유 태그 기반 패턴 적용(강화 보호막, 분열 사망, 시간 저주, 탄환 왜곡, 50% 광폭화, 빙결장, 폭발 파동, 보호막 파괴, 궁극기 저항, 쌍둥이 동시 스폰, 순간이동/소환, 주기 무적, 모듈 교란 등).
+- **히든 단서 추리 UX**
+  - META 탭에서 단서 발견 상태를 확인하고, 요구 단서를 만족하면 해독(추리) 시도를 통해 추가 보상과 히든 코어 해금 힌트를 획득.
 
-## Planning/Implementation Notes
+## 참고 문서
 
-- Final design gap analysis report (Korean): `docs/FINAL_SPEC_GAP_ANALYSIS.md`
-
-## Gameplay Unlock Notes
-
-- Evolution cores are now gated by runtime conditions (instead of always showing every path at wave 15).
-- Hidden cores are unlocked via internal condition checks and their unlock conditions are intentionally not shown in the Deploy UI.
-- Global artifact unlock conditions are now wired to runtime progress tracking (`achievements`) and auto-unlock when each condition is met.
-- Artifact effects are now applied in combat/stat layers (damage, shield, summon/module scaling, status scaling, rewards, and low-HP bonuses).
-- Enemy system has been expanded to cover broad role groups (normal/fast/defense/ranged/summon/disrupt/economic interference/hidden) with wave-based composition growth and expanded elite prefix variants.
-- Spec alias enemy variants (boss aides + elemental families + additional fast/defense/economic variants) are also included in the spawn catalog for full type coverage.
-- The spawn catalog now contains every requested canonical enemy identifier from sections 13-1 through 13-10 (including boss aides, hidden enemies, and elemental enemies).
+- 갭 분석 보고서: `docs/FINAL_SPEC_GAP_ANALYSIS.md`
+- 버전 변경 기록: `VERSION.md`

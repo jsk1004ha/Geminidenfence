@@ -1,6 +1,54 @@
 import { Enemy, Projectile, CoreStats, OrbitalModule, EnemyType, Summon } from '../types';
 import { CORE_X, CORE_Y, CANVAS_SIZE } from '../constants';
 
+interface BossDef {
+  id: string;
+  name: string;
+  tier: 'NORMAL' | 'ADVANCED' | 'HIDDEN';
+  minWave: number;
+  hpMult: number;
+  dmgMult: number;
+  speedMult: number;
+  rewardMult: number;
+  tags: string[];
+  condition?: (wave: number, core: CoreStats, usedUltThisWave: boolean) => boolean;
+}
+
+const BOSS_DEFS: BossDef[] = [
+  { id: 'shield_colossus', name: '방패 거신', tier: 'NORMAL', minWave: 10, hpMult: 1.2, dmgMult: 1.0, speedMult: 1, rewardMult: 1.1, tags: ['SHIELD_OVERLOAD'] },
+  { id: 'split_lord', name: '분열 군주', tier: 'NORMAL', minWave: 20, hpMult: 1.05, dmgMult: 1.0, speedMult: 1, rewardMult: 1.1, tags: ['DEATH_SPLIT'] },
+  { id: 'time_devourer', name: '시간 포식자', tier: 'NORMAL', minWave: 30, hpMult: 1.1, dmgMult: 1.1, speedMult: 1, rewardMult: 1.15, tags: ['TIME_CURSE'] },
+  { id: 'magnetic_beast', name: '자기장 괴수', tier: 'NORMAL', minWave: 40, hpMult: 1.2, dmgMult: 1.1, speedMult: 1, rewardMult: 1.2, tags: ['PROJECTILE_DISTORT'] },
+  { id: 'greed_judge', name: '탐욕 심판자', tier: 'NORMAL', minWave: 50, hpMult: 1.2, dmgMult: 1.2, speedMult: 1, rewardMult: 1.25, tags: ['ECON_PUNISH'] },
+  { id: 'infinite_core', name: '무한 핵', tier: 'NORMAL', minWave: 60, hpMult: 1.35, dmgMult: 1.1, speedMult: 1, rewardMult: 1.3, tags: ['BERSERK_HALF'] },
+  { id: 'glacier_giant', name: '빙하 거인', tier: 'NORMAL', minWave: 70, hpMult: 1.3, dmgMult: 1.2, speedMult: 0.95, rewardMult: 1.3, tags: ['GLACIAL_FIELD'] },
+  { id: 'volcanic_heart', name: '화산 심장', tier: 'NORMAL', minWave: 80, hpMult: 1.35, dmgMult: 1.25, speedMult: 1, rewardMult: 1.35, tags: ['ERUPTION'] },
+  { id: 'electric_lord', name: '전류 군주', tier: 'NORMAL', minWave: 90, hpMult: 1.4, dmgMult: 1.25, speedMult: 1, rewardMult: 1.4, tags: ['SHIELD_BREAKER'] },
+  { id: 'void_eater', name: '공허 포식자', tier: 'NORMAL', minWave: 100, hpMult: 1.5, dmgMult: 1.3, speedMult: 1, rewardMult: 1.5, tags: ['ANTI_ULT'] },
+
+  { id: 'twin_destroyers', name: '쌍둥이 파괴자', tier: 'ADVANCED', minWave: 110, hpMult: 1.2, dmgMult: 1.3, speedMult: 1.2, rewardMult: 1.7, tags: ['TWIN'] },
+  { id: 'iron_siege', name: '철갑 대공성체', tier: 'ADVANCED', minWave: 120, hpMult: 1.8, dmgMult: 1.2, speedMult: 0.9, rewardMult: 1.8, tags: ['HEAVY_ARMOR'] },
+  { id: 'rift_lord', name: '균열 군주', tier: 'ADVANCED', minWave: 130, hpMult: 1.5, dmgMult: 1.3, speedMult: 1.0, rewardMult: 1.9, tags: ['RIFT_BLINK', 'SUMMON_AIDES'] },
+  { id: 'abyss_knight', name: '심연의 기사', tier: 'ADVANCED', minWave: 140, hpMult: 1.6, dmgMult: 1.35, speedMult: 1.0, rewardMult: 2.0, tags: ['KILL_RAMP'] },
+  { id: 'golden_tyrant', name: '황금 폭군', tier: 'ADVANCED', minWave: 150, hpMult: 1.5, dmgMult: 1.35, speedMult: 1.1, rewardMult: 2.5, tags: ['GOLDEN_BOUNTY'] },
+  { id: 'cursed_citadel', name: '저주받은 성채', tier: 'ADVANCED', minWave: 160, hpMult: 1.7, dmgMult: 1.3, speedMult: 0.95, rewardMult: 2.1, tags: ['UPGRADE_WEAKEN'] },
+  { id: 'nano_infection', name: '나노 감염체', tier: 'ADVANCED', minWave: 170, hpMult: 1.5, dmgMult: 1.3, speedMult: 1.0, rewardMult: 2.2, tags: ['SELF_CLONE'] },
+  { id: 'phase_predator', name: '위상 포식자', tier: 'ADVANCED', minWave: 180, hpMult: 1.6, dmgMult: 1.35, speedMult: 1.1, rewardMult: 2.2, tags: ['PHASE_INVINCIBLE'] },
+  { id: 'polluted_star', name: '오염된 별', tier: 'ADVANCED', minWave: 190, hpMult: 1.7, dmgMult: 1.4, speedMult: 0.95, rewardMult: 2.3, tags: ['GLOBAL_DEBUFF'] },
+  { id: 'resonance_breaker', name: '공명 파괴자', tier: 'ADVANCED', minWave: 200, hpMult: 1.7, dmgMult: 1.45, speedMult: 1.0, rewardMult: 2.4, tags: ['MODULE_DISRUPT'] },
+
+  { id: 'void_watcher_hidden', name: '공허 감시자', tier: 'HIDDEN', minWave: 120, hpMult: 1.8, dmgMult: 1.5, speedMult: 1.1, rewardMult: 3.0, tags: ['ANTI_ULT', 'HIDDEN_RELIC'], condition: (_w, _c, usedUlt) => !usedUlt },
+  { id: 'eye_of_singularity', name: '특이점의 눈', tier: 'HIDDEN', minWave: 130, hpMult: 1.9, dmgMult: 1.5, speedMult: 1.0, rewardMult: 3.0, tags: ['SHIELD_OVERLOAD', 'RIFT_BLINK'], condition: (_w, core) => core.id.includes('gravity') || core.id.includes('singularity') },
+  { id: 'rewinder', name: '역행자', tier: 'HIDDEN', minWave: 140, hpMult: 1.9, dmgMult: 1.55, speedMult: 1.0, rewardMult: 3.1, tags: ['TIME_CURSE', 'PHASE_INVINCIBLE'], condition: (_w, core) => core.id.includes('time') || core.id.includes('paradox') },
+  { id: 'gold_judicator', name: '황금의 심판자', tier: 'HIDDEN', minWave: 150, hpMult: 1.8, dmgMult: 1.5, speedMult: 1.2, rewardMult: 3.2, tags: ['GOLDEN_BOUNTY', 'ECON_PUNISH'], condition: (_w, core) => core.type === 'ECONOMIC' },
+  { id: 'silent_king', name: '침묵한 왕', tier: 'HIDDEN', minWave: 160, hpMult: 2.0, dmgMult: 1.6, speedMult: 1.0, rewardMult: 3.2, tags: ['UPGRADE_WEAKEN'], condition: (_w, core) => core.id.includes('silence') },
+  { id: 'abyss_bloom', name: '심연 개화체', tier: 'HIDDEN', minWave: 170, hpMult: 2.0, dmgMult: 1.6, speedMult: 1.0, rewardMult: 3.3, tags: ['KILL_RAMP', 'GLOBAL_DEBUFF'] },
+  { id: 'mirror_lord', name: '거울 군주', tier: 'HIDDEN', minWave: 180, hpMult: 2.0, dmgMult: 1.6, speedMult: 1.0, rewardMult: 3.3, tags: ['PROJECTILE_DISTORT'], condition: (_w, core) => core.id.includes('copy') || core.id.includes('mirror') },
+  { id: 'collapse_nucleus', name: '붕괴의 핵', tier: 'HIDDEN', minWave: 190, hpMult: 2.1, dmgMult: 1.65, speedMult: 1.0, rewardMult: 3.4, tags: ['BERSERK_HALF', 'ERUPTION'], condition: (_w, core) => core.id.includes('overheat') || core.id.includes('collapse') },
+  { id: 'eclipse_apostle', name: '식월의 사도', tier: 'HIDDEN', minWave: 200, hpMult: 2.1, dmgMult: 1.65, speedMult: 1.0, rewardMult: 3.5, tags: ['ANTI_ULT', 'GLACIAL_FIELD'], condition: (_w, core) => core.id.includes('photon') || core.id.includes('void') || core.id.includes('eclipse') },
+  { id: 'omega_sentinel', name: '오메가 파수꾼', tier: 'HIDDEN', minWave: 210, hpMult: 2.2, dmgMult: 1.7, speedMult: 1.1, rewardMult: 3.6, tags: ['SHIELD_OVERLOAD', 'MODULE_DISRUPT', 'PHASE_INVINCIBLE'], condition: (_w, core) => core.id.includes('omega') },
+];
+
 export class GameEngine {
   enemies: Enemy[] = [];
   projectiles: Projectile[] = [];
@@ -253,6 +301,80 @@ export class GameEngine {
          enemy.invincibleTimer -= deltaTime;
       }
 
+      if (enemy.isBoss) {
+         enemy.bossCooldown = (enemy.bossCooldown || 0) + deltaTime;
+         const tags = (enemy.bossTag || '').split('|');
+         const hpRatio = enemy.maxHp > 0 ? enemy.hp / enemy.maxHp : 1;
+
+         if (tags.includes('BERSERK_HALF') && hpRatio <= 0.5 && (enemy.bossPhase || 0) < 2) {
+            enemy.bossPhase = 2;
+            enemy.speed *= 1.3;
+            enemy.damage *= 1.35;
+         }
+         if (tags.includes('SHIELD_OVERLOAD') && (enemy.bossCooldown || 0) > 6) {
+            enemy.maxShield = Math.max(enemy.maxShield || 0, enemy.maxHp * 0.6);
+            enemy.shield = Math.min(enemy.maxShield, (enemy.shield || 0) + enemy.maxHp * 0.2);
+            enemy.bossCooldown = 0;
+         }
+         if (tags.includes('TIME_CURSE') && (enemy.bossCooldown || 0) > 5) {
+            this.lastShotTime = Math.max(0, this.lastShotTime - 350);
+            enemy.bossCooldown = 0;
+         }
+         if (tags.includes('RIFT_BLINK') && (enemy.bossCooldown || 0) > 4) {
+            const blinkAngle = Math.random() * Math.PI * 2;
+            enemy.x = CORE_X + Math.cos(blinkAngle) * 280;
+            enemy.y = CORE_Y + Math.sin(blinkAngle) * 280;
+            enemy.bossCooldown = 0;
+         }
+         if (tags.includes('PHASE_INVINCIBLE') && (enemy.bossCooldown || 0) > 7) {
+            enemy.invincibleTimer = 1.8;
+            enemy.bossCooldown = 0;
+         }
+         if (tags.includes('SELF_CLONE') && (enemy.bossCooldown || 0) > 8 && this.enemies.length < 80) {
+            this.enemies.push({
+              ...enemy,
+              id: Math.random().toString(36),
+              isBoss: false,
+              isElite: true,
+              name: `${enemy.name} 분열체`,
+              type: 'BOSS_CLONE_AIDE',
+              hp: enemy.maxHp * 0.22,
+              maxHp: enemy.maxHp * 0.22,
+              shield: 0,
+              maxShield: 0,
+              damage: enemy.damage * 0.7,
+              reward: Math.max(1, Math.floor(enemy.reward * 0.2)),
+              bossTag: undefined,
+            });
+            enemy.bossCooldown = 0;
+         }
+         if (tags.includes('SUMMON_AIDES') && (enemy.bossCooldown || 0) > 6 && this.enemies.length < 100) {
+            for (let i = 0; i < 2; i++) {
+              this.spawnEnemy(Math.max(1, Math.floor(wave * 0.7)), core);
+            }
+            enemy.bossCooldown = 0;
+         }
+         if (tags.includes('ERUPTION') && (enemy.bossCooldown || 0) > 5) {
+            onCoreDamage(Math.max(1, enemy.damage * 0.7));
+            this.enemies.forEach(e => {
+              if (!e.isBoss) {
+                const eruptDist = Math.sqrt((e.x - enemy.x) ** 2 + (e.y - enemy.y) ** 2);
+                if (eruptDist < 130) e.burnTimer = 2.5;
+              }
+            });
+            enemy.bossCooldown = 0;
+         }
+         if (tags.includes('MODULE_DISRUPT') && (enemy.bossCooldown || 0) > 4) {
+            this.modules.forEach(m => { m.rotationSpeed *= 0.96; });
+          }
+         if (tags.includes('GLACIAL_FIELD')) {
+            this.modules.forEach(m => { m.rotationSpeed *= 0.999; });
+         }
+         if (tags.includes('GLOBAL_DEBUFF')) {
+            core.regen = Math.max(-0.5, core.regen - 0.002 * deltaTime);
+         }
+      }
+
       // Illusion mechanics
       if (enemy.type === 'ILLUSION' || enemy.type === 'AFTERIMAGE' || enemy.type === 'BOSS_CLONE_AIDE') {
          enemy.illusionTimer = (enemy.illusionTimer || 0) + deltaTime;
@@ -288,7 +410,8 @@ export class GameEngine {
       if (this.isUltActive && core.type === 'CONTROL') {
          enemy.x += (dx / dist) * 150 * deltaTime;
          enemy.y += (dy / dist) * 150 * deltaTime;
-         enemy.hp -= core.attackDamage * 5 * deltaTime;
+         const antiUlt = enemy.isBoss && (enemy.bossTag || '').includes('ANTI_ULT');
+         enemy.hp -= core.attackDamage * (antiUlt ? 2 : 5) * deltaTime;
       }
       
       if (dist > 35) {
@@ -365,6 +488,9 @@ export class GameEngine {
         } else {
            const actualDmg = Math.max(1, enemy.damage - core.defense);
            onCoreDamage(actualDmg);
+           if (enemy.isBoss && (enemy.bossTag || '').includes('SHIELD_BREAKER') && core.shield && core.shield > 0) {
+             core.shield = Math.max(0, core.shield - actualDmg * 2);
+           }
            
            // REFLECTOR Module
            const reflectorCount = this.modules.filter(m => m.type === 'REFLECTOR').length;
@@ -399,6 +525,26 @@ export class GameEngine {
     // Clean up dead enemies, award points if ult killed them
     this.enemies = this.enemies.filter(e => {
        if (e.hp <= 0 && e.maxHp > 0) {
+         if (e.isBoss && (e.bossTag || '').includes('DEATH_SPLIT')) {
+           for (let i = 0; i < 4; i++) {
+             this.enemies.push({
+               id: Math.random().toString(36),
+               type: 'BOSS_SPLINTER',
+               name: '분열 파편',
+               isBoss: false,
+               x: e.x + (Math.random() - 0.5) * 60,
+               y: e.y + (Math.random() - 0.5) * 60,
+               hp: e.maxHp * 0.12,
+               maxHp: e.maxHp * 0.12,
+               speed: 0.35 + Math.random() * 0.2,
+               damage: Math.max(1, e.damage * 0.5),
+               reward: Math.max(2, Math.floor(e.reward * 0.2)),
+               angle: 0,
+               radius: 6,
+               defense: 2
+             });
+           }
+         }
          if ((e.prefix === '분열하는' || ['EGG_SACK','SPLITTER','ARMORED_SPIDER'].includes(e.type)) && this.enemies.length < 120) {
            for (let i = 0; i < 2; i++) {
              this.enemies.push({
@@ -446,6 +592,16 @@ export class GameEngine {
            if (Math.random() < 0.1) {
              this.enemies.forEach(en => en.hp -= core.attackDamage * 10);
            }
+         }
+
+         if (!e.isBoss) {
+           this.enemies.forEach(b => {
+             if (b.isBoss && (b.bossTag || '').includes('KILL_RAMP')) {
+               b.bossPower = (b.bossPower || 1) + 0.02;
+               b.damage *= 1.01;
+               b.speed *= 1.005;
+             }
+           });
          }
 
          const method = this.isUltActive ? 'ULT' : (e.burnTimer && e.burnTimer > 0 ? 'BURN' : 'PROJECTILE');
@@ -585,8 +741,12 @@ export class GameEngine {
       }
       
       if (target) {
-        const dx = target.x - p.x;
-        const dy = target.y - p.y;
+        let dx = target.x - p.x;
+        let dy = target.y - p.y;
+        if (target.isBoss && (target.bossTag || '').includes('PROJECTILE_DISTORT')) {
+          dx += (Math.random() - 0.5) * 80;
+          dy += (Math.random() - 0.5) * 80;
+        }
         const dist = Math.sqrt(dx * dx + dy * dy);
         
         if (dist < 15) {
@@ -609,6 +769,8 @@ export class GameEngine {
               }
 
               if (actualDmg > 0) {
+                 if (target.isBoss && (target.bossTag || '').includes('HEAVY_ARMOR')) actualDmg *= 0.55;
+                 if (target.isBoss && (target.bossTag || '').includes('GLOBAL_DEBUFF')) actualDmg *= 0.85;
                  if (target.vulnTimer && target.vulnTimer > 0) actualDmg *= 1.5;
                  target.hp -= actualDmg;
                  if (target.reflect && target.reflect > 0) {
@@ -734,6 +896,10 @@ export class GameEngine {
     this.activeUltName = core.ultName?.toUpperCase() || null;
 
     const ult = this.activeUltName || '';
+    const dealUltDamage = (e: Enemy, amount: number) => {
+      const reduced = e.isBoss && (e.bossTag || '').includes('ANTI_ULT') ? amount * 0.35 : amount;
+      e.hp -= reduced;
+    };
 
     if (ult.includes('BLACK HOLE') || ult.includes('EVENT HORIZON') || ult.includes('COLLAPSE')) {
        // 블랙홀: 적 흡입
@@ -769,7 +935,7 @@ export class GameEngine {
        // 전자기 폭풍
        this.ultTimer = 1;
        this.enemies.forEach(e => {
-          e.hp -= core.attackDamage * 15;
+          dealUltDamage(e, core.attackDamage * 15);
           e.stunTimer = 2;
        });
     } else if (ult.includes('NEBULA') || ult.includes('PULSE') || ult.includes('BURST')) {
@@ -779,13 +945,13 @@ export class GameEngine {
           const dx = CORE_X - e.x;
           const dy = CORE_Y - e.y;
           const dist = Math.sqrt(dx*dx + dy*dy);
-          if (dist < 300) { e.hp -= core.attackDamage * 30; }
+          if (dist < 300) { dealUltDamage(e, core.attackDamage * 30); }
        });
     } else if (ult.includes('SOLAR') || ult.includes('SUN') || ult.includes('FLARE') || ult.includes('PLASMA') || ult.includes('ERUPTION')) {
        // 태양섬광 (빛과 화염 피해)
        this.ultTimer = 1;
        this.enemies.forEach(e => {
-          e.hp -= core.attackDamage * 20;
+          dealUltDamage(e, core.attackDamage * 20);
           e.burnTimer = 5;
           e.burnDamage = core.attackDamage * 2;
        });
@@ -793,7 +959,7 @@ export class GameEngine {
        // 공허 파동 (적 특수능력 제거 및 피해)
        this.ultTimer = 2;
        this.enemies.forEach(e => {
-          e.hp -= core.attackDamage * 10;
+          dealUltDamage(e, core.attackDamage * 10);
           e.speed = Math.min(e.speed, 0.5); // 영구 감속 효과
           e.damage = Math.max(1, Math.floor(e.damage * 0.5)); // 공격력 감소
        });
@@ -804,7 +970,7 @@ export class GameEngine {
           const angle = Math.random() * Math.PI * 2;
           e.x += Math.cos(angle) * 300;
           e.y += Math.sin(angle) * 300;
-          e.hp -= core.attackDamage * 5;
+          dealUltDamage(e, core.attackDamage * 5);
        });
     } else if (ult.includes('NANO') || ult.includes('INFECTION')) {
        // 나노 범람 (적 전체 나노 감염)
@@ -827,13 +993,13 @@ export class GameEngine {
        // 심판 포격 (보스와 엘리트 집중 타격 / 가장 체력 많은 적)
        this.ultTimer = 1;
        const targets = this.enemies.sort((a,b) => b.hp - a.hp).slice(0, 5);
-       targets.forEach(t => t.hp -= core.attackDamage * 50);
+       targets.forEach(t => dealUltDamage(t, core.attackDamage * 50));
     } else if (ult.includes('ZERO') || ult.includes('FREEZE') || ult.includes('BLIZZARD')) {
        // 절대영도 (전체 감속과 빙결)
        this.ultTimer = 1;
        this.enemies.forEach(e => {
           e.freezeTimer = 5;
-          e.hp -= core.attackDamage * 10;
+          dealUltDamage(e, core.attackDamage * 10);
        });
     } else if (ult.includes('BARRIER') || ult.includes('SHIELD') || ult.includes('AEGIS') || ult.includes('CITADEL') || ult.includes('FORTRESS')) {
        // 방벽 전개 (대형 보호막 생성)
@@ -842,11 +1008,11 @@ export class GameEngine {
     } else if (ult.includes('SUPERNOVA')) {
        // 초신성 폭발 (화면 전체 대폭발)
        this.ultTimer = 1;
-       this.enemies.forEach(e => e.hp -= core.attackDamage * 60);
+       this.enemies.forEach(e => dealUltDamage(e, core.attackDamage * 60));
     } else {
        // 기본 궁극기 로직 (매치 안되는 경우)
        this.ultTimer = 2;
-       this.enemies.forEach(e => e.hp -= core.attackDamage * 20);
+       this.enemies.forEach(e => dealUltDamage(e, core.attackDamage * 20));
     }
   }
 
@@ -994,32 +1160,52 @@ export class GameEngine {
   }
 
   spawnBoss(wave: number, core: CoreStats) {
-    const angle = Math.random() * Math.PI * 2;
     const dist = CANVAS_SIZE / 2 + 50;
-
     let reward = 50 + wave * 5;
-    
-    // Economic core features
     if (core.id.includes('greed')) reward *= 3;
     if (core.id.includes('gold')) reward *= 5;
     if (core.id.includes('harvest')) reward *= 4;
 
-    this.enemies.push({
-      id: 'BOSS_' + wave,
-      type: 'BOSS',
-      name: `Wave ${wave} Boss`,
-      isBoss: true,
-      x: CORE_X + Math.cos(angle) * dist,
-      y: CORE_Y + Math.sin(angle) * dist,
-      hp: 200 + wave * 50,
-      maxHp: 200 + wave * 50,
-      speed: 0.02,
-      damage: 15 + wave,
-      defense: Math.floor(wave / 2),
-      reward: reward,
-      angle: 0,
-      radius: dist
-    });
+    const pool = BOSS_DEFS.filter(b => wave >= b.minWave && (!b.condition || b.condition(wave, core, this.usedUltThisWave)));
+    const pick = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : BOSS_DEFS[0];
+    const spawnOne = (idx: number, total: number) => {
+      const angle = (Math.PI * 2 * idx) / total + Math.random() * 0.2;
+      const baseHp = (200 + wave * 50) * pick.hpMult;
+      const isTwin = pick.tags.includes('TWIN');
+      const hp = isTwin ? baseHp * 0.62 : baseHp;
+      const bossReward = Math.floor(reward * pick.rewardMult * (isTwin ? 0.7 : 1));
+      this.enemies.push({
+        id: `BOSS_${pick.id}_${wave}_${idx}`,
+        type: 'BOSS',
+        name: pick.name,
+        bossId: pick.id,
+        bossTier: pick.tier,
+        bossPhase: 1,
+        bossPower: 1,
+        bossCooldown: 0,
+        bossTag: pick.tags.join('|'),
+        isBoss: true,
+        x: CORE_X + Math.cos(angle) * dist,
+        y: CORE_Y + Math.sin(angle) * dist,
+        hp,
+        maxHp: hp,
+        speed: 0.02 * pick.speedMult,
+        damage: (15 + wave) * pick.dmgMult,
+        defense: Math.floor(wave / 2) + (pick.tags.includes('HEAVY_ARMOR') ? Math.floor(wave / 3) : 0),
+        shield: pick.tags.includes('SHIELD_OVERLOAD') ? hp * 0.35 : 0,
+        maxShield: pick.tags.includes('SHIELD_OVERLOAD') ? hp * 0.35 : 0,
+        reward: pick.tags.includes('GOLDEN_BOUNTY') ? bossReward * 2 : bossReward,
+        angle: 0,
+        radius: dist
+      });
+    };
+
+    if (pick.tags.includes('TWIN')) {
+      spawnOne(0, 2);
+      spawnOne(1, 2);
+    } else {
+      spawnOne(0, 1);
+    }
   }
 
   findNearestWithinRange(range: number) {
@@ -1147,7 +1333,10 @@ export class GameEngine {
       else if (e.type === 'THIEF') { color = '#10B981'; size = 7; }
       else if (e.type === 'GOLD_SLIME') { color = '#FBED4A'; size = 12; }
       else if (e.type === 'BLINKER') { color = '#D946EF'; size = 8; }
-      else if (e.type === 'BOSS') { color = '#EF4444'; size = 20; }
+      else if (e.type === 'BOSS') {
+        color = e.bossTier === 'HIDDEN' ? '#A855F7' : (e.bossTier === 'ADVANCED' ? '#F97316' : '#EF4444');
+        size = e.bossTier === 'HIDDEN' ? 24 : 20;
+      }
       
       if (e.isElite) {
          size += 3;

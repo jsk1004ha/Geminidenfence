@@ -1,4 +1,6 @@
-export type MenuTab = 'DEPLOY' | 'RESEARCH' | 'ARTIFACTS';
+export type MenuTab = 'DEPLOY' | 'RESEARCH' | 'ARTIFACTS' | 'META';
+
+export type ChallengeModeId = 'NORMAL' | 'BOSS_RUSH' | 'SILENCE_NIGHT' | 'ELITE_INVASION' | 'OVERHEAT_FIELD' | 'GREED_TRIAL';
 
 export interface GameState {
   credits: number; // Persistent currency
@@ -19,6 +21,22 @@ export interface GameState {
   artifacts: string[]; // run tacticals
   pendingArtifact: boolean;
   pendingEvolution: boolean;
+  pendingRiskChoice: boolean;
+  selectedChallenge: ChallengeModeId;
+  activeRiskIds: string[];
+  missionClaims: string[];
+  missionChainStep: number;
+  missionLastRefresh: string;
+  title: string;
+  unlockedTitles: string[];
+  prestigeCount: number;
+  transcendencePoints: number;
+  missionSeedDate: string;
+  hiddenClues: string[];
+  solvedMysteries: string[];
+  masteryXp: Record<string, number>;
+  prestigeUpgrades: Record<string, number>;
+  coreMemories: Record<string, number>;
 }
 
 export type CoreType = 'BASIC' | 'ATTACK' | 'DEFENSE' | 'CONTROL' | 'SUMMON' | 'ECONOMIC' | 'SPECIAL' | 'HIDDEN';
@@ -107,6 +125,12 @@ export interface Enemy {
   cloneTimer?: number;
   dashCooldown?: number;
   illusionTimer?: number;
+  bossId?: string;
+  bossTier?: 'NORMAL' | 'ADVANCED' | 'HIDDEN';
+  bossPhase?: number;
+  bossPower?: number;
+  bossCooldown?: number;
+  bossTag?: string;
 }
 
 export interface Projectile {

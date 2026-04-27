@@ -5,8 +5,8 @@ import {
   Settings, ArrowUpCircle, Coins, Cpu, Crosshair, Atom,
   FlaskConical, Lock, Unlock, Check
 } from 'lucide-react';
-import { GameState, CoreStats, ModuleType } from './types';
-import { INITIAL_GAME_STATE, CORE_TEMPLATES, CANVAS_SIZE, UPGRADES, MODULES, GLOBAL_UPGRADES, ARTIFACTS_LIST, GLOBAL_ARTIFACTS } from './constants';
+import { GameState, CoreStats, ChallengeModeId } from './types';
+import { INITIAL_GAME_STATE, CORE_TEMPLATES, CANVAS_SIZE, UPGRADES, MODULES, GLOBAL_UPGRADES, ARTIFACTS_LIST, GLOBAL_ARTIFACTS, CHALLENGE_MODES, RISK_OPTIONS, TITLE_DEFS, HIDDEN_CLUES, HIDDEN_MYSTERIES, TITLE_EFFECTS, MASTERY_DEFS, PRESTIGE_UPGRADES, MISSION_DEFS } from './constants';
 
 function generateRandomModules() {
    const shuffled = [...MODULES].sort(() => 0.5 - Math.random());
@@ -59,7 +59,22 @@ export default function App() {
           globalUpgrades: parsed.globalUpgrades || {},
           unlockedCores: parsed.unlockedCores || ['circle-core'],
           globalArtifacts: parsed.globalArtifacts || [],
-          achievements: parsed.achievements || {}
+          achievements: parsed.achievements || {},
+          selectedChallenge: parsed.selectedChallenge || 'NORMAL',
+          missionClaims: parsed.missionClaims || [],
+          title: parsed.title || '첫 방어자',
+          unlockedTitles: parsed.unlockedTitles || ['첫 방어자'],
+          prestigeCount: parsed.prestigeCount || 0,
+          transcendencePoints: parsed.transcendencePoints || 0,
+          missionSeedDate: parsed.missionSeedDate || new Date().toISOString().slice(0, 10),
+          hiddenClues: parsed.hiddenClues || [],
+          solvedMysteries: parsed.solvedMysteries || [],
+          masteryXp: parsed.masteryXp || {},
+          masteryLevels: parsed.masteryLevels || {},
+          prestigeUpgrades: parsed.prestigeUpgrades || {},
+          coreMemories: parsed.coreMemories || {},
+          missionChainStep: parsed.missionChainStep || 0,
+          missionLastRefresh: parsed.missionLastRefresh || new Date().toISOString().slice(0, 10),
         }));
       } catch (e) { console.error('Save corrupted'); }
     }
@@ -73,10 +88,25 @@ export default function App() {
         globalUpgrades: gameState.globalUpgrades,
         unlockedCores: gameState.unlockedCores,
         globalArtifacts: gameState.globalArtifacts,
-        achievements: gameState.achievements
+        achievements: gameState.achievements,
+        selectedChallenge: gameState.selectedChallenge,
+        missionClaims: gameState.missionClaims,
+        title: gameState.title,
+        unlockedTitles: gameState.unlockedTitles,
+        prestigeCount: gameState.prestigeCount,
+        transcendencePoints: gameState.transcendencePoints,
+        missionSeedDate: gameState.missionSeedDate,
+        hiddenClues: gameState.hiddenClues,
+        solvedMysteries: gameState.solvedMysteries,
+        masteryXp: gameState.masteryXp,
+        masteryLevels: gameState.masteryLevels,
+        prestigeUpgrades: gameState.prestigeUpgrades,
+        coreMemories: gameState.coreMemories,
+        missionChainStep: gameState.missionChainStep,
+        missionLastRefresh: gameState.missionLastRefresh,
       }));
     }
-  }, [gameState.credits, gameState.permanentUpgrades, gameState.globalUpgrades, gameState.unlockedCores, gameState.globalArtifacts, gameState.achievements, gameState.gameStatus]);
+  }, [gameState.credits, gameState.permanentUpgrades, gameState.globalUpgrades, gameState.unlockedCores, gameState.globalArtifacts, gameState.achievements, gameState.gameStatus, gameState.selectedChallenge, gameState.missionClaims, gameState.title, gameState.unlockedTitles, gameState.prestigeCount, gameState.transcendencePoints, gameState.missionSeedDate, gameState.hiddenClues, gameState.solvedMysteries, gameState.masteryXp, gameState.masteryLevels, gameState.prestigeUpgrades, gameState.coreMemories, gameState.missionChainStep, gameState.missionLastRefresh]);
 
   const applyGlobalUpgrades = (baseCore: CoreStats) => {
      let newCore = { ...baseCore };
@@ -134,9 +164,90 @@ export default function App() {
     return unlocks;
   };
 
+  const dailyMissions = React.useMemo(() => MISSION_DEFS.filter(m => m.category === 'DAILY').map(m => ({
+    ...m,
+    progress: gameState.achievements[m.metric] || 0
+  })), [gameState.achievements]);
+
+  const weeklyMissions = React.useMemo(() => MISSION_DEFS.filter(m => m.category === 'WEEKLY').map(m => ({
+    ...m,
+    progress: gameState.achievements[m.metric] || 0
+  })), [gameState.achievements]);
+
+  const metaMissions = React.useMemo(() => MISSION_DEFS.filter(m => !['DAILY', 'WEEKLY'].includes(m.category)).map(m => ({
+    ...m,
+    progress: m.category === 'CHAIN'
+      ? (m.id === 'chain_1' ? (gameState.achievements.total_kills || 0) : m.id === 'chain_2' ? (gameState.achievements.boss_kills || 0) : (gameState.achievements.best_wave || 0))
+      : m.category === 'MASTERY'
+        ? Object.values(gameState.masteryLevels).reduce((a, b) => Number(a) + Number(b), 0)
+        : gameState.achievements[m.metric] || 0
+  })), [gameState.achievements, gameState.masteryLevels]);
+
+  const claimMission = (missionId: string, reward: number, rewardType: string) => {
+    setGameState(prev => {
+      if (prev.missionClaims.includes(missionId)) return prev;
+      const rewardBonus = 1 + ((prev.prestigeUpgrades.global_reward || 0) * 0.03);
+      const convertedReward = rewardType === 'CREDIT' ? reward : Math.floor(reward * 0.8);
+      const next: GameState = { ...prev, credits: prev.credits + convertedReward * rewardBonus, missionClaims: [...prev.missionClaims, missionId] };
+      if (missionId.startsWith('chain_')) {
+        next.missionChainStep = Math.max(prev.missionChainStep, Number(missionId.split('_')[1]));
+      }
+      return next;
+    });
+  };
+
+  const getMasteryLevel = (xp: number) => Math.floor(Math.sqrt(Math.max(0, xp) / 60));
+  const masteryById = (id: string) => ({
+    xp: gameState.masteryXp[id] || 0,
+    lv: getMasteryLevel(gameState.masteryXp[id] || 0),
+  });
+
+  const applyRunPreset = (baseCore: CoreStats, challenge: ChallengeModeId) => {
+    const next = { ...baseCore };
+    const challengeDef = CHALLENGE_MODES.find(c => c.id === challenge);
+    const prestigeBonus = 1 + gameState.transcendencePoints * 0.02;
+    const titleFx = TITLE_EFFECTS[gameState.title] || { desc: '' };
+    const barrageLv = masteryById('barrage').lv;
+    const barrierLv = masteryById('barrier').lv;
+    const greedLv = masteryById('greed').lv;
+    const automationLv = gameState.prestigeUpgrades.automation || 0;
+    const coreMemoryLv = gameState.coreMemories[next.id] || 0;
+    next.attackDamage *= prestigeBonus;
+    next.maxHp *= prestigeBonus;
+    next.hp = next.maxHp;
+    next.attackSpeed *= Math.max(0.55, 1 - barrageLv * 0.015);
+    next.shieldRegen = (next.shieldRegen || 0) + barrierLv * 0.25;
+    next.attackDamage *= 1 + coreMemoryLv * 0.01;
+    next.maxHp *= 1 + coreMemoryLv * 0.01;
+    next.hp = next.maxHp;
+    if (titleFx.attack) next.attackDamage *= titleFx.attack;
+    if (titleFx.hp) { next.maxHp *= titleFx.hp; next.hp = next.maxHp; }
+    if (titleFx.shield && next.maxShield) {
+      next.maxShield *= titleFx.shield;
+      next.shield = next.maxShield;
+    }
+    if (automationLv > 0) next.regen += automationLv * 0.05;
+    if (greedLv > 0 && next.type === 'ECONOMIC') next.attackDamage *= 1 + greedLv * 0.01;
+    if (challenge === 'SILENCE_NIGHT') next.ultMax = 999999;
+    if (challenge === 'OVERHEAT_FIELD') {
+      next.attackDamage *= 1.25;
+      next.regen -= 0.25;
+    }
+    if (challenge === 'GREED_TRIAL') {
+      next.attackDamage *= 0.85;
+      next.maxHp *= 0.85;
+      next.hp = next.maxHp;
+    }
+    if (challengeDef?.id === 'ELITE_INVASION') {
+      next.attackSpeed *= 0.92;
+    }
+    return next;
+  };
+
   const startGame = (coreId?: string) => {
     const selectedCoreId = coreId || gameState.activeCoreId;
-    const startFunds = (gameState.globalUpgrades['start_funds'] || 0) * 25;
+    const autoLv = gameState.prestigeUpgrades.automation || 0;
+    const startFunds = (gameState.globalUpgrades['start_funds'] || 0) * 25 + autoLv * 40;
     
     if (!gameState.unlockedCores.includes(selectedCoreId)) return;
 
@@ -149,10 +260,12 @@ export default function App() {
       availableModules: generateRandomModules(),
       artifacts: [],
       pendingArtifact: false,
+      pendingRiskChoice: false,
+      activeRiskIds: [],
       permanentUpgrades: {} 
     }));
     
-    setCore(applyGlobalUpgrades(CORE_TEMPLATES[selectedCoreId]));
+    setCore(applyRunPreset(applyGlobalUpgrades(CORE_TEMPLATES[selectedCoreId]), gameState.selectedChallenge));
     engineRef.current = new GameEngine();
   };
 
@@ -181,12 +294,16 @@ export default function App() {
         .filter(c => c.type === 'HIDDEN')
         .filter(c => !prev.unlockedCores.includes(c.id))
         .filter(c => HIDDEN_CORE_REQUIREMENTS[c.id]?.(prev));
+      if ((prev.prestigeUpgrades.omega_research || 0) > 0 && !prev.unlockedCores.includes('omega-core')) {
+        hiddenToUnlock.push(CORE_TEMPLATES['omega-core']);
+      }
 
       if (hiddenToUnlock.length === 0) return prev;
+      const uniqueUnlocks = Array.from(new Set(hiddenToUnlock.map(c => c.id)));
 
       return {
         ...prev,
-        unlockedCores: [...prev.unlockedCores, ...hiddenToUnlock.map(c => c.id)]
+        unlockedCores: [...prev.unlockedCores, ...uniqueUnlocks]
       };
     });
   }, [gameState.globalArtifacts, gameState.achievements, gameState.unlockedCores]);
@@ -199,19 +316,106 @@ export default function App() {
     });
   }, [gameState.achievements, gameState.globalArtifacts]);
 
+  useEffect(() => {
+    setGameState(prev => {
+      const unlocked = new Set(prev.unlockedTitles);
+      if ((prev.achievements.boss_kills || 0) >= 1) unlocked.add('첫 방어자');
+      if ((prev.achievements.near_death_survive || 0) >= 1) unlocked.add('불굴의 핵');
+      if ((prev.achievements.risk_choices || 0) >= 3) unlocked.add('탐욕의 생존자');
+      if ((prev.achievements.no_ult_boss_kills || 0) >= 1) unlocked.add('침묵의 수호자');
+      if ((prev.achievements.blackhole_kills || 0) >= 120) unlocked.add('블랙홀의 주인');
+      if ((prev.achievements.drone_damage_total || 0) >= 300) unlocked.add('드론 지휘관');
+      if ((prev.achievements.defense_highwave_clear || 0) >= 1) unlocked.add('성채의 심장');
+      if ((prev.achievements.omega_trial_clear || 0) >= 1) unlocked.add('오메가 도전자');
+      if ((prev.achievements.void_watcher_kills || 0) >= 1) unlocked.add('공허를 본 자');
+      const hiddenCount = prev.unlockedCores.filter(id => CORE_TEMPLATES[id]?.type === 'HIDDEN').length;
+      if (hiddenCount >= 3) unlocked.add('히든 사냥꾼');
+      if (unlocked.size === prev.unlockedTitles.length) return prev;
+      const unlockedTitles = Array.from(unlocked);
+      return { ...prev, unlockedTitles, title: unlockedTitles[unlockedTitles.length - 1] };
+    });
+  }, [gameState.achievements, gameState.unlockedCores]);
+
+  useEffect(() => {
+    setGameState(prev => {
+      const next = new Set(prev.hiddenClues);
+      const a = prev.achievements;
+      const clueBoost = prev.prestigeUpgrades.clue_boost || 0;
+      const reqMult = Math.max(0.5, 1 - clueBoost * 0.05);
+      if ((a.blackhole_kills || 0) >= 80 * reqMult) next.add('clue_gravity');
+      if ((a.no_ult_boss_kills || 0) >= 1) next.add('clue_silence');
+      if ((a.econ_upgrades_purchased || 0) >= 20 * reqMult || (a.risk_choices || 0) >= 2) next.add('clue_gold');
+      if ((a.time_stop_boss_kills || 0) >= 1) next.add('clue_rewind');
+      if ((a.clone_kills || 0) >= 40 * reqMult) next.add('clue_mirror');
+      if ((a.low_hp_seconds || 0) >= 90 * reqMult) next.add('clue_collapse');
+      if (next.size === prev.hiddenClues.length) return prev;
+      return { ...prev, hiddenClues: Array.from(next) };
+    });
+  }, [gameState.achievements]);
+
+  useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (gameState.missionLastRefresh === today) return;
+    setGameState(prev => {
+      const dailyIds = new Set(MISSION_DEFS.filter(m => m.category === 'DAILY').map(m => m.id));
+      return {
+        ...prev,
+        missionLastRefresh: today,
+        missionClaims: prev.missionClaims.filter(id => !dailyIds.has(id))
+      };
+    });
+  }, [gameState.missionLastRefresh]);
+
+  const solveMystery = (mysteryId: string) => {
+    const mystery = HIDDEN_MYSTERIES.find(m => m.id === mysteryId);
+    if (!mystery) return;
+    setGameState(prev => {
+      if (prev.solvedMysteries.includes(mysteryId)) return prev;
+      const canSolve = mystery.requires.every(req => prev.hiddenClues.includes(req));
+      if (!canSolve) return prev;
+      return {
+        ...prev,
+        solvedMysteries: [...prev.solvedMysteries, mysteryId],
+        credits: prev.credits + 250,
+        achievements: {
+          ...prev.achievements,
+          mystery_solves: (prev.achievements.mystery_solves || 0) + 1
+        }
+      };
+    });
+  };
+
+  const gainMastery = (id: string, amount: number) => {
+    setGameState(prev => {
+      const nextXp = (prev.masteryXp[id] || 0) + amount;
+      const nextLv = getMasteryLevel(nextXp);
+      const prevLv = prev.masteryLevels[id] || 0;
+      return {
+        ...prev,
+        masteryXp: { ...prev.masteryXp, [id]: nextXp },
+        masteryLevels: { ...prev.masteryLevels, [id]: Math.max(prevLv, nextLv) }
+      };
+    });
+  };
+
   const handleWaveComplete = () => {
     setGameState(prev => {
       const nextWave = prev.wave + 1;
       const isMilestone = nextWave > 1 && nextWave % 5 === 0;
+      const isRiskWave = nextWave > 1 && nextWave % 7 === 0;
       
       const printerCount = engineRef.current.modules.filter(m => m.type === 'REWARD_PRINTER').length;
+      const globalRewardMult = 1 + ((prev.prestigeUpgrades.global_reward || 0) * 0.05);
+      const titleArtifactBonus = TITLE_EFFECTS[prev.title]?.artifact || 1;
+      const greedMasteryBonus = 1 + ((prev.masteryLevels.greed || 0) * 0.02);
       
       let nextState = { 
         ...prev, 
         wave: nextWave, 
-        credits: prev.credits + prev.wave * 2 + printerCount * 5,
+        credits: prev.credits + (prev.wave * 2 + printerCount * 5) * globalRewardMult * titleArtifactBonus * greedMasteryBonus,
         runCoins: prev.runCoins + printerCount * 20,
         availableModules: generateRandomModules(),
+        pendingRiskChoice: isRiskWave,
         achievements: {
           ...prev.achievements,
           best_wave: Math.max(prev.achievements.best_wave || 0, nextWave),
@@ -234,6 +438,10 @@ export default function App() {
       }
       if (core.id.includes('omega') && nextWave >= 30) nextState.achievements.omega_trial_clear = 1;
       if (core.id.includes('abyss') && nextWave >= 30) nextState.achievements.abyss_trial_clear = 1;
+      nextState.masteryLevels = {
+        ...prev.masteryLevels,
+        [core.id]: (prev.masteryLevels[core.id] || 0) + 1
+      };
 
       return nextState;
     });
@@ -245,11 +453,12 @@ export default function App() {
 
   const artifactOptions = React.useMemo(() => {
     if (!gameState.pendingArtifact) return [];
+    const extra = Math.min(2, gameState.prestigeUpgrades.artifact_slot || 0);
     return [...ARTIFACTS_LIST]
       .filter(a => !gameState.artifacts.includes(a.id))
       .sort(() => Math.random() - 0.5)
-      .slice(0, 3);
-  }, [gameState.pendingArtifact, gameState.artifacts]);
+      .slice(0, 3 + extra);
+  }, [gameState.pendingArtifact, gameState.artifacts, gameState.prestigeUpgrades.artifact_slot]);
 
   const selectArtifact = (artifactId: string, effectId: string) => {
      setGameState(prev => ({
@@ -270,8 +479,14 @@ export default function App() {
 
   const evolutionOptions = React.useMemo(() => {
     if (!gameState.pendingEvolution) return [];
-    return Object.values(CORE_TEMPLATES).filter(c => c.baseCoreId === core.id && canEvolveTo(c));
-  }, [gameState.pendingEvolution, core.id, gameState.wave, gameState.globalArtifacts, gameState.achievements]);
+    const base = Object.values(CORE_TEMPLATES).filter(c => c.baseCoreId === core.id && canEvolveTo(c));
+    const extraSlots = Math.min(2, gameState.prestigeUpgrades.evolution_slot || 0);
+    if (extraSlots === 0) return base;
+    const extra = Object.values(CORE_TEMPLATES)
+      .filter(c => c.type === core.type && c.evolutionLevel >= 2 && !base.some(b => b.id === c.id))
+      .slice(0, extraSlots);
+    return [...base, ...extra];
+  }, [gameState.pendingEvolution, core.id, core.type, gameState.wave, gameState.globalArtifacts, gameState.achievements, gameState.prestigeUpgrades.evolution_slot]);
 
   const selectEvolution = (evoCoreId: string) => {
      setGameState(prev => ({
@@ -293,11 +508,40 @@ export default function App() {
      }));
   };
 
+  const selectRiskOption = (riskId: string) => {
+    const risk = RISK_OPTIONS.find(r => r.id === riskId);
+    if (!risk) return;
+    const apply = risk.apply as Partial<Record<'coreHp' | 'coreDamage' | 'reward' | 'ultCharge', number>>;
+    setGameState(prev => ({
+      ...prev,
+      pendingRiskChoice: false,
+      activeRiskIds: [...prev.activeRiskIds, risk.id],
+      achievements: {
+        ...prev.achievements,
+        risk_choices: (prev.achievements.risk_choices || 0) + 1,
+      }
+    }));
+    if (apply.coreHp) {
+      setCore(prev => ({ ...prev, maxHp: prev.maxHp * apply.coreHp!, hp: Math.min(prev.hp, prev.maxHp * apply.coreHp!) }));
+    }
+    if (apply.coreDamage) {
+      setCore(prev => ({ ...prev, attackDamage: prev.attackDamage * apply.coreDamage! }));
+    }
+  };
+
   const handleEnemyKill = (reward: number, isBoss: boolean = false, byUlt: boolean = false, enemy?: any, method?: string) => {
     const coinMult = gameState.artifacts.includes('art_5') ? 1.3 : 1;
     const harvesterCount = engineRef.current.modules.filter(m => m.type === 'HARVESTER').length;
     const gaRewardMult = gameState.globalArtifacts.includes('ga_12') ? 1.2 : 1;
-    const finalCoinMult = coinMult * (1 + 0.5 * harvesterCount) * gaRewardMult;
+    const challengeMult = CHALLENGE_MODES.find(c => c.id === gameState.selectedChallenge)?.rewardMult || 1;
+    const riskRewardMult = gameState.activeRiskIds.reduce((acc, id) => {
+      const risk = RISK_OPTIONS.find(r => r.id === id);
+      const apply = (risk?.apply || {}) as Partial<Record<'reward', number>>;
+      return acc * (apply.reward || 1);
+    }, 1);
+    const titleCoin = TITLE_EFFECTS[gameState.title]?.coin || 1;
+    const greedMasteryBonus = 1 + (masteryById('greed').lv * 0.02);
+    const finalCoinMult = coinMult * (1 + 0.5 * harvesterCount) * gaRewardMult * challengeMult * riskRewardMult * titleCoin * greedMasteryBonus;
     const ultMult = gameState.artifacts.includes('art_8') ? 1.3 : 1;
     
     setGameState(prev => {
@@ -318,6 +562,10 @@ export default function App() {
           drone_damage_total: (prev.achievements.drone_damage_total || 0) + (method === 'SUMMON' ? Math.max(1, enemy?.maxHp || 1) : 0),
         }
       };
+      next.masteryLevels = {
+        ...prev.masteryLevels,
+        [core.id]: (prev.masteryLevels[core.id] || 0) + 0.2
+      };
 
       if (isBoss) {
         next.achievements.boss_kills = (next.achievements.boss_kills || 0) + 1;
@@ -333,12 +581,24 @@ export default function App() {
 
       return next;
     });
+
+    gainMastery('barrage', method === 'PROJECTILE' ? 2 : 0.5);
+    gainMastery('explosion', method === 'BURN' || method === 'ULT' ? 1.5 : 0.3);
+    gainMastery('drone', method === 'SUMMON' ? 2 : 0.2);
+    gainMastery('flame', method === 'BURN' ? 2 : 0.1);
+    gainMastery('summon', method === 'SUMMON' ? 1.4 : 0.1);
+    gainMastery('void', byUlt ? 0.6 : 0.2);
+    gainMastery('greed', reward * 0.05);
+    if (enemy?.freezeTimer && enemy.freezeTimer > 0) gainMastery('frost', 1.2);
+    if ((enemy?.slowTimer || 0) > 0) gainMastery('gravity', 0.8);
   };
 
   const handleCoreDamage = (dmg: number) => {
     setCore(prev => {
-      let remainingDmg = dmg;
+      const challengeIncomingMult = gameState.selectedChallenge === 'ELITE_INVASION' ? 1.25 : 1;
+      let remainingDmg = dmg * challengeIncomingMult;
       let nextShield = prev.shield ?? 0;
+      const originalShield = nextShield;
       
       if (nextShield > 0) {
          if (nextShield >= remainingDmg) {
@@ -366,11 +626,15 @@ export default function App() {
       if (nextHp <= 0) {
         setGameState(gs => ({ ...gs, gameStatus: 'GAMEOVER' }));
       }
+      const absorbed = Math.max(0, originalShield - nextShield);
+      if (absorbed > 0) gainMastery('barrier', absorbed * 0.2);
+      if (engineRef.current.modules.some(m => m.type === 'REFLECTOR')) gainMastery('reflect', 0.4);
       return { ...prev, hp: nextHp, shield: nextShield };
     });
   };
 
   const activateUlt = () => {
+    if (gameState.selectedChallenge === 'SILENCE_NIGHT') return;
     if (gameState.ultCharge >= (core.ultMax || 100)) {
        setGameState(prev => ({
          ...prev,
@@ -380,6 +644,7 @@ export default function App() {
            ult_uses: (prev.achievements.ult_uses || 0) + 1
          }
        }));
+       gainMastery('time', 4);
        engineRef.current.triggerUltimate(core);
     }
   };
@@ -478,8 +743,48 @@ export default function App() {
      }
   };
 
+  const doPrestige = () => {
+    setGameState(prev => {
+      const gain = Math.max(1, Math.floor((prev.achievements.best_wave || 1) / 20));
+      return {
+        ...prev,
+        credits: Math.floor(prev.credits * 0.25),
+        globalUpgrades: Object.fromEntries(Object.entries(prev.globalUpgrades).map(([k, v]) => [k, Math.floor(Number(v) * 0.5)])),
+        permanentUpgrades: {},
+        prestigeCount: prev.prestigeCount + 1,
+        transcendencePoints: prev.transcendencePoints + gain,
+        achievements: { ...prev.achievements, prestige_uses: (prev.achievements.prestige_uses || 0) + 1 },
+      };
+    });
+  };
+
+  const buyPrestigeUpgrade = (upgradeId: string) => {
+    const up = PRESTIGE_UPGRADES.find(u => u.id === upgradeId);
+    if (!up) return;
+    setGameState(prev => {
+      const cur = prev.prestigeUpgrades[upgradeId] || 0;
+      if (cur >= up.max || prev.transcendencePoints < up.cost) return prev;
+      return {
+        ...prev,
+        transcendencePoints: prev.transcendencePoints - up.cost,
+        prestigeUpgrades: { ...prev.prestigeUpgrades, [upgradeId]: cur + 1 }
+      };
+    });
+  };
+
+  const investCoreMemory = (coreId: string) => {
+    setGameState(prev => {
+      if ((prev.prestigeUpgrades.core_memory || 0) <= 0 || prev.transcendencePoints <= 0) return prev;
+      return {
+        ...prev,
+        transcendencePoints: prev.transcendencePoints - 1,
+        coreMemories: { ...prev.coreMemories, [coreId]: (prev.coreMemories[coreId] || 0) + 1 }
+      };
+    });
+  };
+
   const animate = (time: number) => {
-    if (lastTimeRef.current !== 0 && !gameState.isPaused && gameState.gameStatus === 'PLAYING' && !gameState.pendingArtifact && !gameState.pendingEvolution) {
+    if (lastTimeRef.current !== 0 && !gameState.isPaused && gameState.gameStatus === 'PLAYING' && !gameState.pendingArtifact && !gameState.pendingEvolution && !gameState.pendingRiskChoice) {
       const deltaTime = (time - lastTimeRef.current) / 1000;
       const ctx = canvasRef.current?.getContext('2d');
       if (ctx) {
@@ -520,7 +825,7 @@ export default function App() {
   useEffect(() => {
     requestRef.current = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(requestRef.current);
-  }, [gameState.isPaused, gameState.gameStatus, gameState.pendingArtifact, gameState.pendingEvolution, core, gameState.ultCharge, gameState.artifacts]);
+  }, [gameState.isPaused, gameState.gameStatus, gameState.pendingArtifact, gameState.pendingEvolution, gameState.pendingRiskChoice, core, gameState.ultCharge, gameState.artifacts]);
 
   const ultPercent = Math.min(100, (gameState.ultCharge / (core.ultMax || 100)) * 100);
 
@@ -536,6 +841,10 @@ export default function App() {
           <h1 className="text-2xl font-black tracking-tighter text-white">ORBITAL CORE <span className="text-[#00F0FF] font-light">IDLE DEFENSE</span></h1>
         </div>
         <div className="flex gap-6">
+          <div className="text-right">
+            <p className="text-[9px] text-[#6B7280] uppercase tracking-widest">Title</p>
+            <p className="text-sm font-mono text-[#22C55E]">{gameState.title}</p>
+          </div>
           <div className="text-right">
             <p className="text-[9px] text-[#6B7280] uppercase tracking-widest">Global Credits</p>
             <p className="text-sm font-mono text-[#00F0FF]">{gameState.credits}</p>
@@ -692,10 +1001,26 @@ export default function App() {
                   <button onClick={() => setGameState(p => ({...p, menuTab: 'DEPLOY'}))} className={`px-4 py-2 border-b-2 text-[10px] font-bold uppercase tracking-widest ${gameState.menuTab === 'DEPLOY' ? 'border-[#00F0FF] text-[#00F0FF]' : 'border-transparent text-[#6B7280] hover:text-white'}`}>Deploy</button>
                   <button onClick={() => setGameState(p => ({...p, menuTab: 'RESEARCH'}))} className={`px-4 py-2 border-b-2 text-[10px] font-bold uppercase tracking-widest ${gameState.menuTab === 'RESEARCH' ? 'border-[#EAB308] text-[#EAB308]' : 'border-transparent text-[#6B7280] hover:text-white'}`}>Research</button>
                   <button onClick={() => setGameState(p => ({...p, menuTab: 'ARTIFACTS'}))} className={`px-4 py-2 border-b-2 text-[10px] font-bold uppercase tracking-widest ${gameState.menuTab === 'ARTIFACTS' ? 'border-[#A855F7] text-[#A855F7]' : 'border-transparent text-[#6B7280] hover:text-white'}`}>Artifacts</button>
+                  <button onClick={() => setGameState(p => ({...p, menuTab: 'META'}))} className={`px-4 py-2 border-b-2 text-[10px] font-bold uppercase tracking-widest ${gameState.menuTab === 'META' ? 'border-[#22C55E] text-[#22C55E]' : 'border-transparent text-[#6B7280] hover:text-white'}`}>Meta</button>
                 </div>
 
                 {gameState.menuTab === 'DEPLOY' && (
                   <div className="flex flex-col gap-4 max-w-2xl w-full px-6 overflow-y-auto pb-8 relative z-20 max-h-[60vh]">
+                     <div className="p-3 border border-[#2D2D33] bg-[#0A0A0C]">
+                       <p className="text-[9px] text-[#22C55E] font-mono tracking-widest uppercase mb-2">Challenge Mode</p>
+                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                         {CHALLENGE_MODES.map(mode => (
+                           <button
+                             key={mode.id}
+                             onClick={() => setGameState(p => ({ ...p, selectedChallenge: mode.id }))}
+                             className={`p-2 text-left border text-[10px] ${gameState.selectedChallenge === mode.id ? 'border-[#22C55E] text-white bg-[#131316]' : 'border-[#2D2D33] text-[#9CA3AF]'}`}
+                           >
+                             <div className="font-bold uppercase">{mode.name}</div>
+                             <div className="text-[9px]">{mode.description} x{mode.rewardMult.toFixed(1)}</div>
+                           </button>
+                         ))}
+                       </div>
+                     </div>
                      {['BASIC', 'ATTACK', 'DEFENSE', 'CONTROL', 'SUMMON', 'ECONOMIC', 'SPECIAL', 'HIDDEN'].map(category => {
                        const coresInCategory = Object.values(CORE_TEMPLATES).filter(c => c.type === category && !c.baseCoreId);
                        const evolutionCores = Object.values(CORE_TEMPLATES).filter(c => c.type === category && c.baseCoreId);
@@ -810,6 +1135,140 @@ export default function App() {
                      </div>
                   </div>
                 )}
+
+                {gameState.menuTab === 'META' && (
+                  <div className="flex flex-col gap-3 w-full max-w-2xl px-8 overflow-y-auto pb-8 relative z-20 max-h-[60vh] text-left">
+                    <div className="p-3 border border-[#2D2D33] bg-[#0A0A0C]">
+                      <p className="text-[9px] text-[#22C55E] font-mono tracking-widest uppercase mb-2">Prestige</p>
+                      <p className="text-[11px] text-white">초월 횟수: {gameState.prestigeCount} / 초월 포인트: {gameState.transcendencePoints}</p>
+                      <p className="text-[9px] text-[#9CA3AF] mb-2">최고 웨이브 기반으로 포인트를 획득하고 글로벌 연구를 초기화합니다.</p>
+                      <button onClick={doPrestige} className="px-3 py-2 border border-[#22C55E] text-[#22C55E] text-[10px] uppercase tracking-widest">프레스티지 실행</button>
+                      <div className="mt-3 space-y-2">
+                        {PRESTIGE_UPGRADES.map(up => {
+                          const lv = gameState.prestigeUpgrades[up.id] || 0;
+                          return (
+                            <div key={up.id} className="p-2 border border-[#2D2D33]">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] text-white">{up.name} Lv.{lv}/{up.max}</span>
+                                <button disabled={lv >= up.max || gameState.transcendencePoints < up.cost} onClick={() => buyPrestigeUpgrade(up.id)} className="text-[9px] border px-2 py-1 border-[#22C55E] text-[#22C55E] disabled:opacity-30">-{up.cost} TP</button>
+                              </div>
+                              <div className="text-[9px] text-[#9CA3AF]">{up.desc}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="p-3 border border-[#2D2D33] bg-[#0A0A0C]">
+                      <p className="text-[9px] text-[#22C55E] font-mono tracking-widest uppercase mb-2">Core Memory</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {gameState.unlockedCores.slice(0, 10).map(id => (
+                          <button key={id} onClick={() => investCoreMemory(id)} className="p-2 border border-[#2D2D33] text-left">
+                            <div className="text-[10px] text-white">{CORE_TEMPLATES[id]?.name || id}</div>
+                            <div className="text-[9px] text-[#9CA3AF]">기억 Lv.{gameState.coreMemories[id] || 0}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="p-3 border border-[#2D2D33] bg-[#0A0A0C]">
+                      <p className="text-[9px] text-[#00F0FF] font-mono tracking-widest uppercase mb-2">Daily / Weekly Missions</p>
+                      <div className="text-[9px] text-[#9CA3AF] mb-2">리프레시: {gameState.missionLastRefresh}</div>
+                      {[...dailyMissions, ...weeklyMissions, ...metaMissions].map(m => {
+                        const done = m.progress >= m.target;
+                        const claimed = gameState.missionClaims.includes(m.id);
+                        const lockedByChain = m.category === 'CHAIN' && Number(m.id.split('_')[1]) > (gameState.missionChainStep + 1);
+                        return (
+                          <div key={m.id} className="mb-2 p-2 border border-[#2D2D33]">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] text-white">[{m.category}] {m.label}</span>
+                              <span className="text-[9px] text-[#EAB308]">{Math.min(m.progress, m.target)}/{m.target}</span>
+                            </div>
+                            {m.recommendedBuild && <div className="text-[8px] text-[#A855F7]">권장 빌드: {m.recommendedBuild}</div>}
+                            <button
+                              disabled={!done || claimed || lockedByChain}
+                              onClick={() => claimMission(m.id, m.reward, m.rewardType)}
+                              className="mt-1 text-[9px] border px-2 py-1 border-[#00F0FF] text-[#00F0FF] disabled:opacity-30"
+                            >
+                              보상 {m.reward} {m.rewardType} {claimed ? '(수령완료)' : lockedByChain ? '(연속 단계 잠김)' : ''}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="p-3 border border-[#2D2D33] bg-[#0A0A0C]">
+                      <p className="text-[9px] text-[#A855F7] font-mono tracking-widest uppercase mb-2">Titles</p>
+                      <p className="text-[10px] mb-2">현재 칭호: <span className="text-white">{gameState.title}</span></p>
+                      {TITLE_DEFS.map(t => (
+                        <div key={t.id} className="text-[9px] text-[#9CA3AF] mb-1">
+                          {gameState.unlockedTitles.includes(t.id) ? <Check className="w-3 h-3 inline mr-1 text-[#22C55E]" /> : <Lock className="w-3 h-3 inline mr-1" />}
+                          {t.id} - {t.condition}
+                          {gameState.unlockedTitles.includes(t.id) && (
+                            <button onClick={() => setGameState(p => ({ ...p, title: t.id }))} className="ml-2 text-[8px] border px-1 border-[#A855F7] text-[#A855F7]">장착</button>
+                          )}
+                        </div>
+                      ))}
+                      <div className="text-[9px] text-[#D1D5DB] mt-2">효과: {TITLE_EFFECTS[gameState.title]?.desc}</div>
+                    </div>
+
+                    <div className="p-3 border border-[#2D2D33] bg-[#0A0A0C]">
+                      <p className="text-[9px] text-[#38BDF8] font-mono tracking-widest uppercase mb-2">Mastery</p>
+                      {MASTERY_DEFS.map(m => {
+                        const xp = gameState.masteryXp[m.id] || 0;
+                        const lv = gameState.masteryLevels[m.id] || 0;
+                        const nextReq = Math.pow(lv + 1, 2) * 60;
+                        return (
+                          <div key={m.id} className="mb-2 p-2 border border-[#2D2D33]">
+                            <div className="flex items-center justify-between text-[10px]">
+                              <span className="text-white">{m.name}</span>
+                              <span className="text-[#38BDF8]">Lv.{lv}</span>
+                            </div>
+                            <div className="text-[9px] text-[#9CA3AF]">{m.bonus}</div>
+                            <div className="text-[9px] text-[#6B7280]">XP {Math.floor(xp)} / {Math.floor(nextReq)}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="p-3 border border-[#2D2D33] bg-[#0A0A0C]">
+                      <p className="text-[9px] text-[#F59E0B] font-mono tracking-widest uppercase mb-2">Hidden Clue Deduction</p>
+                      <div className="space-y-2 mb-3">
+                        {HIDDEN_CLUES.map(clue => {
+                          const found = gameState.hiddenClues.includes(clue.id);
+                          return (
+                            <div key={clue.id} className="p-2 border border-[#2D2D33]">
+                              <div className="text-[10px] text-white">{clue.name} {found ? <span className="text-[#22C55E]">(발견)</span> : <span className="text-[#6B7280]">(미발견)</span>}</div>
+                              <div className="text-[9px] text-[#9CA3AF]">{found ? clue.hint : '전투 로그가 부족합니다. 더 많은 실험이 필요합니다.'}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="space-y-2">
+                        {HIDDEN_MYSTERIES.map(myst => {
+                          const solved = gameState.solvedMysteries.includes(myst.id);
+                          const canSolve = myst.requires.every(req => gameState.hiddenClues.includes(req));
+                          return (
+                            <div key={myst.id} className="p-2 border border-[#2D2D33]">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] text-white">{myst.name}</span>
+                                <button
+                                  onClick={() => solveMystery(myst.id)}
+                                  disabled={!canSolve || solved}
+                                  className="text-[9px] border px-2 py-1 border-[#F59E0B] text-[#F59E0B] disabled:opacity-30"
+                                >
+                                  {solved ? '해독 완료' : '해독 시도'}
+                                </button>
+                              </div>
+                              <div className="text-[9px] text-[#9CA3AF]">요구 단서: {myst.requires.join(', ')}</div>
+                              <div className="text-[9px] text-[#D1D5DB]">보상: {myst.reward}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </motion.div>
             )}
 
@@ -870,6 +1329,21 @@ export default function App() {
               </div>
             )}
 
+            {gameState.pendingRiskChoice && (
+              <div className="absolute inset-0 bg-[#050506]/95 backdrop-blur-lg flex flex-col items-center justify-center z-50 text-center px-8 border-[8px] border-[#EAB308]/30 rounded-[100%]">
+                <h2 className="text-3xl font-black text-white tracking-tighter mb-2 uppercase">RISK / REWARD</h2>
+                <p className="text-[#EAB308] font-mono text-[10px] uppercase tracking-[0.4em] mb-8">고위험 선택</p>
+                <div className="flex flex-col gap-3 w-full max-w-lg">
+                  {[...RISK_OPTIONS].sort(() => Math.random() - 0.5).slice(0, 3).map(opt => (
+                    <button key={opt.id} onClick={() => selectRiskOption(opt.id)} className="p-3 border border-[#2D2D33] bg-[#0A0A0C] hover:border-[#EAB308] text-left">
+                      <div className="text-[11px] text-white">{opt.name}</div>
+                      <div className="text-[9px] text-[#9CA3AF]">{opt.description}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* GAME OVER */}
             {gameState.gameStatus === 'GAMEOVER' && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-[#050506]/95 backdrop-blur-md flex flex-col items-center justify-center z-40 text-center px-4 border-[8px] border-[#FF4D00]/20 rounded-[100%]">
@@ -909,7 +1383,7 @@ export default function App() {
 
                 <button 
                   onClick={() => {
-                     if (ultPercent >= 100 && !engineRef.current.usedUltThisWave) {
+                     if (ultPercent >= 100 && !engineRef.current.usedUltThisWave && gameState.selectedChallenge !== 'SILENCE_NIGHT') {
                         engineRef.current.triggerUltimate(core);
                         setGameState(p => ({
                           ...p,
@@ -921,7 +1395,7 @@ export default function App() {
                         }));
                      }
                   }} 
-                  disabled={ultPercent < 100 || engineRef.current.usedUltThisWave}
+                  disabled={ultPercent < 100 || engineRef.current.usedUltThisWave || gameState.selectedChallenge === 'SILENCE_NIGHT'}
                   className={`px-6 py-2 border flex flex-col items-center justify-center font-mono transition-colors shadow-xl ${ultPercent >= 100 && !engineRef.current.usedUltThisWave ? 'bg-[#1A1A1E] border-white text-white hover:bg-white hover:text-black cursor-pointer' : 'bg-[#0A0A0C]/90 border-[#2D2D33] text-[#4B5563] cursor-not-allowed opacity-50'}`}
                 >
                    <span className="text-[14px] font-bold uppercase">{core.ultName || 'ULT'}</span>
@@ -973,6 +1447,12 @@ export default function App() {
                         <div className="flex gap-3"><span className="text-[#A855F7] w-8">SCAN</span><span className="flex-1">Wave {gameState.wave} incoming.</span></div>
                      )}
                    </div>
+                </div>
+                <div className="bg-transparent border-none px-0 py-0 font-mono">
+                  <h3 className="text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-2">RISK EFFECTS</h3>
+                  <div className="text-[9px] text-[#EAB308] space-y-1">
+                    {gameState.activeRiskIds.length === 0 ? <div className="text-[#4B5563]">None</div> : gameState.activeRiskIds.map(id => <div key={id}>{RISK_OPTIONS.find(r => r.id === id)?.name || id}</div>)}
+                  </div>
                 </div>
              </>
           )}
