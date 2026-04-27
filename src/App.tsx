@@ -6,13 +6,18 @@ import {
   FlaskConical, Lock, Unlock, Check
 } from 'lucide-react';
 import { GameState, CoreStats, ModuleType } from './types';
-import { INITIAL_GAME_STATE, CORE_TEMPLATES, CANVAS_SIZE, UPGRADES, MODULE_PRICES, GLOBAL_UPGRADES, ARTIFACTS_LIST, GLOBAL_ARTIFACTS } from './constants';
+import { INITIAL_GAME_STATE, CORE_TEMPLATES, CANVAS_SIZE, UPGRADES, MODULES, GLOBAL_UPGRADES, ARTIFACTS_LIST, GLOBAL_ARTIFACTS } from './constants';
+
+function generateRandomModules() {
+   const shuffled = [...MODULES].sort(() => 0.5 - Math.random());
+   return shuffled.slice(0, 3).map(m => m.id);
+}
 import { GameEngine } from './game/GameEngine';
 
 export default function App() {
   const [gameState, setGameState] = useState<GameState>(INITIAL_GAME_STATE);
   const [core, setCore] = useState<CoreStats>(CORE_TEMPLATES[INITIAL_GAME_STATE.activeCoreId]);
-  const [engineState, setEngineState] = useState({ enemies: 0, ultActive: false });
+  const [engineState, setEngineState] = useState<{enemies: number, ultActive: boolean, activeUltName: string | null}>({ enemies: 0, ultActive: false, activeUltName: null });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine>(new GameEngine());
   const requestRef = useRef<number>(0);
@@ -80,6 +85,7 @@ export default function App() {
       wave: 1, 
       activeCoreId: selectedCoreId, 
       ultCharge: 0,
+      availableModules: generateRandomModules(),
       artifacts: [],
       pendingArtifact: false,
       permanentUpgrades: {} 
@@ -106,10 +112,14 @@ export default function App() {
       const nextWave = prev.wave + 1;
       const isMilestone = nextWave > 1 && nextWave % 5 === 0;
       
+      const printerCount = engineRef.current.modules.filter(m => m.type === 'REWARD_PRINTER').length;
+      
       let nextState = { 
         ...prev, 
         wave: nextWave, 
-        credits: prev.credits + prev.wave * 2 
+        credits: prev.credits + prev.wave * 2 + printerCount * 5,
+        runCoins: prev.runCoins + printerCount * 20,
+        availableModules: generateRandomModules()
       };
 
       if (isMilestone) {
@@ -180,12 +190,14 @@ export default function App() {
 
   const handleEnemyKill = (reward: number, isBoss: boolean = false, byUlt: boolean = false) => {
     const coinMult = gameState.artifacts.includes('art_5') ? 1.3 : 1;
+    const harvesterCount = engineRef.current.modules.filter(m => m.type === 'HARVESTER').length;
+    const finalCoinMult = coinMult * (1 + 0.5 * harvesterCount);
     const ultMult = gameState.artifacts.includes('art_8') ? 1.3 : 1;
     
     setGameState(prev => {
       const next = { 
         ...prev, 
-        runCoins: prev.runCoins + (reward * coinMult),
+        runCoins: prev.runCoins + (reward * finalCoinMult),
         ultCharge: Math.min(core.ultMax || 100, prev.ultCharge + (reward * 0.5 * ultMult)) 
       };
 
@@ -203,7 +215,20 @@ export default function App() {
 
   const handleCoreDamage = (dmg: number) => {
     setCore(prev => {
-      const nextHp = Math.max(0, prev.hp - dmg);
+      let remainingDmg = dmg;
+      let nextShield = prev.shield ?? 0;
+      
+      if (nextShield > 0) {
+         if (nextShield >= remainingDmg) {
+            nextShield -= remainingDmg;
+            remainingDmg = 0;
+         } else {
+            remainingDmg -= nextShield;
+            nextShield = 0;
+         }
+      }
+
+      const nextHp = Math.max(0, prev.hp - remainingDmg);
       
       // artifact ga_2: 체력 1% 이하 생존
       if (nextHp > 0 && nextHp <= prev.maxHp * 0.01) {
@@ -213,25 +238,30 @@ export default function App() {
       if (nextHp <= 0) {
         setGameState(gs => ({ ...gs, gameStatus: 'GAMEOVER' }));
       }
-      return { ...prev, hp: nextHp };
+      return { ...prev, hp: nextHp, shield: nextShield };
     });
   };
 
   const activateUlt = () => {
     if (gameState.ultCharge >= (core.ultMax || 100)) {
        setGameState(prev => ({ ...prev, ultCharge: 0 }));
-       engineRef.current.triggerUltimate();
+       engineRef.current.triggerUltimate(core);
     }
   };
 
-  const buyModule = (type: ModuleType) => {
-    const cost = MODULE_PRICES[type as keyof typeof MODULE_PRICES];
-    if (gameState.runCoins >= cost && engineRef.current.modules.length < 10) {
-      setGameState(prev => ({ ...prev, runCoins: prev.runCoins - cost }));
+  const buyModule = (moduleId: string) => {
+    const moduleDef = MODULES.find(m => m.id === moduleId);
+    if (moduleDef && gameState.runCoins >= moduleDef.cost && engineRef.current.modules.length < 20) {
+      setGameState(prev => ({ ...prev, runCoins: prev.runCoins - moduleDef.cost }));
       
       let color = '#00F0FF';
-      if (type === 'LASER') color = '#FF4D00';
-      if (type === 'LENS') color = '#A855F7';
+      if (moduleDef.type.includes('LASER')) color = '#FF4D00';
+      if (moduleDef.type.includes('LENS')) color = '#A855F7';
+      if (moduleDef.type.includes('SHIELD')) color = '#38BDF8';
+      if (moduleDef.type.includes('DRONE') || moduleDef.type.includes('MISSILE')) color = '#8B5CF6';
+      if (moduleDef.type.includes('FLAME')) color = '#EF4444';
+      if (moduleDef.type.includes('COOLING')) color = '#60A5FA';
+      // etc... default fallback
 
       let baseRotSpeed = (0.5 + Math.random() * 1.5) * (Math.random()>0.5?1:-1);
       if (gameState.artifacts.includes('art_2')) {
@@ -240,12 +270,13 @@ export default function App() {
 
       engineRef.current.modules.push({
         id: Math.random().toString(36),
-        type,
+        type: moduleDef.type,
         angle: Math.random() * Math.PI * 2,
-        distance: 60 + Math.random() * 60,
+        distance: 80 + Math.random() * 100, // further out
         rotationSpeed: baseRotSpeed,
-        damage: 20,
-        color
+        damage: 10 + Math.random() * 20,
+        color,
+        lastActionTime: 0
       });
     }
   };
@@ -317,7 +348,8 @@ export default function App() {
         engineRef.current.render(ctx, core);
         setEngineState({ 
            enemies: engineRef.current.enemies.length, 
-           ultActive: engineRef.current.isUltActive 
+           ultActive: engineRef.current.isUltActive,
+           activeUltName: engineRef.current.activeUltName
         });
       }
     }
@@ -379,6 +411,19 @@ export default function App() {
                       <div style={{ width: `${(core.hp / core.maxHp) * 100}%`, backgroundColor: core.color }} className="h-full shadow-[0_0_10px_currentColor] transition-all" />
                     </div>
                   </div>
+                  
+                  {core.maxShield !== undefined && core.maxShield > 0 && (
+                     <div>
+                        <div className="flex justify-between text-[9px] text-[#6B7280] mb-1 font-mono uppercase tracking-widest">
+                           <span>Shield (Regen {core.shieldRegen}/s)</span>
+                           <span className="text-[#38BDF8]">{Math.ceil(core.shield || 0)} / {Math.ceil(core.maxShield)}</span>
+                        </div>
+                        <div className="w-full bg-[#1A1A1E] h-1.5 overflow-hidden">
+                           <div style={{ width: `${((core.shield || 0) / core.maxShield) * 100}%` }} className="h-full bg-[#38BDF8] shadow-[0_0_10px_#38BDF8] transition-all" />
+                        </div>
+                     </div>
+                  )}
+
                   <div>
                     <div className="flex justify-between text-[9px] text-[#6B7280] mb-1 font-mono uppercase tracking-widest">
                       <span>Ultimate: {core.ultName}</span>
@@ -467,6 +512,16 @@ export default function App() {
           <div className={`aspect-square w-[700px] max-w-full rounded-[100%] border-[1px] border-dashed transition-colors duration-1000 ${engineState.ultActive ? 'border-[#A855F7]/40 shadow-[0_0_100px_rgba(168,85,247,0.2)]' : 'border-[#2D2D33]'} relative flex-shrink-0 flex items-center justify-center`}>
             <canvas ref={canvasRef} width={CANVAS_SIZE} height={CANVAS_SIZE} className="w-full h-full object-contain mix-blend-screen" />
             
+            {/* ULTIMATE ACTIVE DISPLAY */}
+            {engineState.ultActive && engineState.activeUltName && (
+               <div className="absolute top-10 left-1/2 -translate-x-1/2 z-50 pointer-events-none flex flex-col items-center">
+                  <motion.div initial={{ opacity: 0, y: -20, scale: 0.8 }} animate={{ opacity: 1, y: 0, scale: 1 }} className="text-3xl font-black text-white italic tracking-tighter mix-blend-screen text-center" style={{ textShadow: `0 0 20px ${core.color}` }}>
+                     {engineState.activeUltName} <span className="text-transparent bg-clip-text bg-gradient-to-r from-white to-[#00F0FF]">ACTIVATED</span>
+                  </motion.div>
+                  <motion.div initial={{ scaleX: 0 }} animate={{ scaleX: 1 }} transition={{ duration: 0.3 }} className="h-1 w-full mt-2" style={{ backgroundColor: core.color }} />
+               </div>
+            )}
+
             {/* INITIAL MENU */}
             {gameState.gameStatus === 'MENU' && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-black/90 backdrop-blur-md flex flex-col items-center justify-start z-30 p-10 pt-16 text-center rounded-[100%]">
@@ -666,17 +721,43 @@ export default function App() {
              <div className="absolute bottom-6 z-20 flex gap-4 w-full px-12 justify-center max-w-[800px]">
                 {/* Modules Store */}
                 <div className="flex gap-2 bg-[#0A0A0C]/90 backdrop-blur p-2 border border-[#2D2D33] rounded-sm shadow-xl flex-1 justify-center">
-                   {[
-                     { id: 'LASER', icon: Crosshair, color: '#FF4D00', price: MODULE_PRICES.LASER },
-                     { id: 'LENS', icon: Target, color: '#A855F7', price: MODULE_PRICES.LENS },
-                   ].map(mdl => (
-                      <button key={mdl.id} onClick={() => buyModule(mdl.id as ModuleType)} disabled={gameState.runCoins < mdl.price} className={`flex flex-col items-center py-2 px-6 border transition-all ${gameState.runCoins >= mdl.price ? 'bg-[#1A1A1E] border-[#2D2D33] hover:border-white' : 'bg-transparent border-transparent opacity-30'} rounded-sm`}>
-                         <mdl.icon className="w-4 h-4 mb-1" style={{ color: mdl.color }} />
-                         <span className="text-[8px] font-mono tracking-widest">{mdl.id}</span>
-                         <span className="text-[10px] text-[#EAB308] font-bold font-mono">{mdl.price}</span>
-                      </button>
-                   ))}
+                   {gameState.availableModules?.map(moduleId => {
+                      const moduleDef = MODULES.find(m => m.id === moduleId);
+                      if (!moduleDef) return null;
+                      const Icon = moduleDef.type.includes('LASER') ? Crosshair : Target;
+                      return (
+                        <div key={moduleDef.id} className="relative group">
+                          <button onClick={() => buyModule(moduleDef.id)} disabled={gameState.runCoins < moduleDef.cost} className={`flex flex-col items-center py-2 px-6 border transition-all ${gameState.runCoins >= moduleDef.cost ? 'bg-[#1A1A1E] border-[#2D2D33] hover:border-white' : 'bg-transparent border-transparent opacity-30'} rounded-sm`}>
+                             <Icon className="w-4 h-4 mb-1 text-white" />
+                             <span className="text-[8px] font-mono tracking-widest">{moduleDef.name}</span>
+                             <span className="text-[10px] text-[#EAB308] font-bold font-mono">{moduleDef.cost}</span>
+                          </button>
+                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-black border border-[#2D2D33] hidden group-hover:block z-50 pointer-events-none text-center rounded-sm">
+                            <div className="text-[#38BDF8] text-[10px] font-bold mb-1">{moduleDef.name}</div>
+                            <div className="text-[#9CA3AF] text-[9px] leading-tight">{moduleDef.description}</div>
+                          </div>
+                        </div>
+                      );
+                   })}
                 </div>
+
+                <button 
+                  onClick={() => {
+                     if (ultPercent >= 100 && !engineRef.current.usedUltThisWave) {
+                        engineRef.current.triggerUltimate(core);
+                        setGameState(p => ({ ...p, ultCharge: 0 }));
+                     }
+                  }} 
+                  disabled={ultPercent < 100 || engineRef.current.usedUltThisWave}
+                  className={`px-6 py-2 border flex flex-col items-center justify-center font-mono transition-colors shadow-xl ${ultPercent >= 100 && !engineRef.current.usedUltThisWave ? 'bg-[#1A1A1E] border-white text-white hover:bg-white hover:text-black cursor-pointer' : 'bg-[#0A0A0C]/90 border-[#2D2D33] text-[#4B5563] cursor-not-allowed opacity-50'}`}
+                >
+                   <span className="text-[14px] font-bold uppercase">{core.ultName || 'ULT'}</span>
+                   {engineRef.current.usedUltThisWave ? (
+                     <span className="text-[8px] tracking-widest text-[#FF4D00]">USED</span>
+                   ) : (
+                     <span className="text-[8px] tracking-widest">{Math.floor(ultPercent)}% READY</span>
+                   )}
+                </button>
 
                 <button onClick={() => setGameState(p => ({ ...p, isPaused: !p.isPaused }))} className="px-6 bg-[#0A0A0C]/90 backdrop-blur border border-[#2D2D33] text-[#D1D5DB] rounded-sm hover:bg-[#1A1A1E] transition-colors shadow-xl">
                   {gameState.isPaused ? <Play className="w-4 h-4 fill-current" /> : <Pause className="w-4 h-4 fill-current" />}

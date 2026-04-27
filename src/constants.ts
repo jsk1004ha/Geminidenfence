@@ -15,6 +15,7 @@ export const INITIAL_GAME_STATE: GameState = {
   globalArtifacts: [],
   achievements: {},
   ultCharge: 0,
+  availableModules: [],
   artifacts: [],
   pendingArtifact: false,
   pendingEvolution: false,
@@ -162,11 +163,11 @@ export const CORE_TEMPLATES: Record<string, CoreStats> = {
 
   // === DEFENSE CATEGORY ===
   'guardian-core': {
-    id: 'guardian-core', name: '수호 코어', type: 'DEFENSE', hp: 200, maxHp: 200, attackDamage: 8, attackSpeed: 1200, range: 250, defense: 10, regen: 0.5, evolutionLevel: 1, color: '#22C55E', ultName: 'ABSOLUTE SHIELD', ultMax: 200, unlockCost: 150,
+    id: 'guardian-core', name: '수호 코어', type: 'DEFENSE', hp: 200, maxHp: 200, shield: 50, maxShield: 50, shieldRegen: 1, attackDamage: 8, attackSpeed: 1200, range: 250, defense: 10, regen: 0.5, evolutionLevel: 1, color: '#22C55E', ultName: 'ABSOLUTE SHIELD', ultMax: 200, unlockCost: 150,
     description: '방어 입문: 체력, 보호막, 회복 능력이 좋다.'
   },
   'barrier-core': {
-    id: 'barrier-core', name: '방벽 코어', type: 'DEFENSE', hp: 250, maxHp: 250, attackDamage: 5, attackSpeed: 1500, range: 200, defense: 15, regen: 0.2, evolutionLevel: 1, color: '#14B8A6', ultName: 'AEGIS', ultMax: 250, unlockCost: 350,
+    id: 'barrier-core', name: '방벽 코어', type: 'DEFENSE', hp: 250, maxHp: 250, shield: 100, maxShield: 100, shieldRegen: 5, attackDamage: 5, attackSpeed: 1500, range: 200, defense: 15, regen: 0.2, evolutionLevel: 1, color: '#14B8A6', ultName: 'AEGIS', ultMax: 250, unlockCost: 350,
     description: '보호막: 주기적으로 보호막 생성'
   },
   'reflect-core': {
@@ -746,11 +747,28 @@ export const ARTIFACTS_LIST = [
   { id: 'art_8', name: '오버클럭 칩', description: '궁극기 충전 속도 30% 증가' },
 ];
 
-export const MODULE_PRICES = {
-  LASER: 100,
-  DRONE: 250,
-  LENS: 150,
-};
+export const MODULES: { id: string, type: import('./types').ModuleType, name: string, description: string, cost: number }[] = [
+  { id: 'mod_1', type: 'LASER_SAT', name: '레이저 위성', description: '회전하며 적을 절단', cost: 100 },
+  { id: 'mod_2', type: 'SHIELD_SAT', name: '보호막 위성', description: '피해 차단', cost: 150 },
+  { id: 'mod_3', type: 'GRAVITY_LENS', name: '중력 렌즈', description: '적 흡입', cost: 120 },
+  { id: 'mod_4', type: 'COOLING_COIL', name: '냉각 코일', description: '적 감속', cost: 130 },
+  { id: 'mod_5', type: 'LIGHTNING_AMP', name: '전류 증폭기', description: '번개 전이 강화', cost: 180 },
+  { id: 'mod_6', type: 'HARVESTER', name: '수확기', description: '처치 보상 증가', cost: 200 },
+  { id: 'mod_7', type: 'DRONE_NEST', name: '드론 둥지', description: '드론 생성', cost: 250 },
+  { id: 'mod_8', type: 'MISSILE_POD', name: '미사일 포드', description: '보스와 엘리트 집중 공격', cost: 220 },
+  { id: 'mod_9', type: 'REFLECTOR', name: '반사판', description: '피해 반사', cost: 160 },
+  { id: 'mod_10', type: 'RIFT_LENS', name: '균열 렌즈', description: '적 이동 경로 왜곡', cost: 170 },
+  { id: 'mod_11', type: 'FLAME_NOZZLE', name: '화염 노즐', description: '주변 적에게 지속 화염 피해', cost: 190 },
+  { id: 'mod_12', type: 'NANO_SPRAYER', name: '나노 살포기', description: '적에게 나노 감염 부여', cost: 210 },
+  { id: 'mod_13', type: 'PHOTON_AMP', name: '광자 증폭기', description: '레이저와 빛 속성 강화', cost: 230 },
+  { id: 'mod_14', type: 'ABSORPTION_RING', name: '흡수 링', description: '받은 피해 일부를 에너지로 전환', cost: 240 },
+  { id: 'mod_15', type: 'EXECUTION_LENS', name: '처형 렌즈', description: '체력이 낮은 적에게 추가 피해', cost: 260 },
+  { id: 'mod_16', type: 'TIME_PENDULUM', name: '시간 진자', description: '일정 주기로 적 속도 감소', cost: 270 },
+  { id: 'mod_17', type: 'BALLISTIC_AMP', name: '탄도 증폭기', description: '탄환 수와 관통 증가', cost: 280 },
+  { id: 'mod_18', type: 'REWARD_PRINTER', name: '보상 프린터', description: '웨이브 보상 증가', cost: 300 },
+  { id: 'mod_19', type: 'PURIFY_COIL', name: '정화 코일', description: '적 디버프와 특수능력 약화', cost: 290 },
+  { id: 'mod_20', type: 'OMEGA_RING', name: '오메가 링', description: '여러 모듈 효과를 약하게 복제', cost: 500 },
+];
 
 export const CANVAS_SIZE = 800;
 export const CORE_X = CANVAS_SIZE / 2;

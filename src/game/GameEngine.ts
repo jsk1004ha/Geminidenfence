@@ -1,13 +1,15 @@
-import { Enemy, Projectile, CoreStats, OrbitalModule, EnemyType } from '../types';
+import { Enemy, Projectile, CoreStats, OrbitalModule, EnemyType, Summon } from '../types';
 import { CORE_X, CORE_Y, CANVAS_SIZE } from '../constants';
 
 export class GameEngine {
   enemies: Enemy[] = [];
   projectiles: Projectile[] = [];
   modules: OrbitalModule[] = [];
+  summons: Summon[] = [];
   lastShotTime: number = 0;
   spawnedThisWave: number = 0;
   isUltActive: boolean = false;
+  activeUltName: string | null = null;
   ultTimer: number = 0;
   usedUltThisWave: boolean = false;
   
@@ -18,6 +20,14 @@ export class GameEngine {
       this.ultTimer -= deltaTime;
       if (this.ultTimer <= 0) {
         this.isUltActive = false;
+        this.activeUltName = null;
+      }
+    }
+
+    // Shield Regen Logic
+    if (core.maxShield && core.maxShield > 0) {
+      if (core.shield! < core.maxShield) {
+         core.shield = Math.min(core.maxShield, core.shield! + (core.shieldRegen || 0) * deltaTime);
       }
     }
 
@@ -53,7 +63,7 @@ export class GameEngine {
       const mx = CORE_X + Math.cos(m.angle) * m.distance;
       const my = CORE_Y + Math.sin(m.angle) * m.distance;
 
-      if (m.type === 'LASER') {
+      if (m.type === 'LASER_SAT' || m.type.includes('LASER')) {
         this.enemies.forEach(e => {
           const dx = mx - e.x;
           const dy = my - e.y;
@@ -66,8 +76,8 @@ export class GameEngine {
             }
           }
         });
-      } else if (m.type === 'LENS') {
-        // Slow aura
+      } else if (m.type === 'GRAVITY_LENS' || m.type === 'RIFT_LENS' || m.type.includes('LENS')) {
+        // Pull or slow aura
         this.enemies.forEach(e => {
            const dist = Math.sqrt((mx - e.x)**2 + (my - e.y)**2);
            if (dist < 100 && e.type !== 'BOSS') {
@@ -75,6 +85,98 @@ export class GameEngine {
              e.y -= (e.y - my) * 0.5 * deltaTime;
            }
         });
+      } else if (m.type === 'COOLING_COIL' || m.type === 'TIME_PENDULUM') {
+         this.enemies.forEach(e => {
+            const dist = Math.sqrt((mx - e.x)**2 + (my - e.y)**2);
+            if (dist < 80) {
+               e.slowTimer = 1.0;
+            }
+         });
+      } else if (m.type === 'DRONE_NEST') {
+         m.lastActionTime = (m.lastActionTime || 0) + deltaTime;
+         if (m.lastActionTime > 3) {
+            this.summons.push({
+               id: Math.random().toString(36), type: 'DRONE',
+               x: mx, y: my, damage: m.damage, speed: 2.0, radius: 0, lifeTime: 0, maxLifeTime: 10,
+               color: m.color, lastAttackTime: 0
+            });
+            m.lastActionTime = 0;
+         }
+      } else if (m.type === 'FLAME_NOZZLE') {
+         this.enemies.forEach(e => {
+            const dist = Math.sqrt((mx - e.x)**2 + (my - e.y)**2);
+            if (dist < 60) {
+               e.burnTimer = 2.0;
+               e.burnDamage = m.damage;
+            }
+         });
+      } else if (m.type === 'SHIELD_SAT') {
+          m.lastActionTime = (m.lastActionTime || 0) + deltaTime;
+          if (m.lastActionTime > 2) {
+             if (core.shield !== undefined && core.maxShield !== undefined && core.shield < core.maxShield) {
+                core.shield = Math.min(core.maxShield, core.shield + 2);
+             }
+             m.lastActionTime = 0;
+          }
+      } else if (m.type === 'LIGHTNING_AMP') {
+          m.lastActionTime = (m.lastActionTime || 0) + deltaTime;
+          if (m.lastActionTime > 1.5) {
+             // shock closest enemy
+             const target = this.enemies.find(e => Math.sqrt((mx-e.x)**2 + (my-e.y)**2) < 250);
+             if (target) {
+                target.hp -= m.damage * moduleDamageMult * 2;
+                if (target.hp <= 0 && target.maxHp > 0) {
+                   onEnemyKill(target.reward, target.type === 'BOSS', false);
+                   target.maxHp = -1;
+                }
+             }
+             m.lastActionTime = 0;
+          }
+      } else if (m.type === 'MISSILE_POD') {
+          m.lastActionTime = (m.lastActionTime || 0) + deltaTime;
+          if (m.lastActionTime > 2.5) {
+             const target = this.enemies.find(e => e.type === 'BOSS' || e.type === 'TANKER') || this.enemies[0];
+             if (target) {
+                this.projectiles.push({
+                   id: Math.random().toString(36), x: mx, y: my, targetId: target.id,
+                   damage: m.damage * moduleDamageMult * 4, speed: 3.0, color: '#EF4444', type: 'MISSILE'
+                });
+             }
+             m.lastActionTime = 0;
+          }
+      } else if (m.type === 'NANO_SPRAYER') {
+          m.lastActionTime = (m.lastActionTime || 0) + deltaTime;
+          if (m.lastActionTime > 1.0) {
+             const target = this.enemies.find(e => Math.sqrt((mx-e.x)**2 + (my-e.y)**2) < 150);
+             if (target) {
+                target.hp -= m.damage * moduleDamageMult;
+             }
+             m.lastActionTime = 0;
+          }
+      } else if (m.type === 'EXECUTION_LENS') {
+         this.enemies.forEach(e => {
+            const dist = Math.sqrt((mx - e.x)**2 + (my - e.y)**2);
+            if (dist < 120 && e.hp > 0 && e.hp < e.maxHp * 0.15 && e.type !== 'BOSS') {
+               e.hp = -1; // Execute
+               onEnemyKill(e.reward, false, false);
+            }
+         });
+      } else if (m.type === 'PURIFY_COIL') {
+         this.enemies.forEach(e => {
+            const dist = Math.sqrt((mx - e.x)**2 + (my - e.y)**2);
+            if (dist < 100) {
+               e.damage = Math.max(1, e.damage - 5 * deltaTime);
+            }
+         });
+      } else if (m.type === 'OMEGA_RING') {
+         m.lastActionTime = (m.lastActionTime || 0) + deltaTime;
+         if (m.lastActionTime > 3.0) {
+            this.enemies.forEach(e => {
+               const dist = Math.sqrt((mx - e.x)**2 + (my - e.y)**2);
+               if (dist < 150) { e.hp -= m.damage * moduleDamageMult; e.slowTimer = 1.0; e.burnTimer = 1.0; e.burnDamage = m.damage; }
+            });
+            m.lastActionTime = 0;
+         }
       }
     });
 
@@ -139,6 +241,19 @@ export class GameEngine {
         // Hit Core
         const actualDmg = Math.max(1, enemy.damage - core.defense);
         onCoreDamage(actualDmg);
+        
+        // REFLECTOR Module
+        const reflectorCount = this.modules.filter(m => m.type === 'REFLECTOR').length;
+        if (reflectorCount > 0) {
+           enemy.hp -= actualDmg * reflectorCount * 2;
+        }
+
+        // ABSORPTION_RING Module
+        const absorbCount = this.modules.filter(m => m.type === 'ABSORPTION_RING').length;
+        if (absorbCount > 0 && core.hp < core.maxHp) {
+           core.hp = Math.min(core.maxHp, core.hp + absorbCount * 2);
+        }
+
         if (enemy.type !== 'BOSS') {
           enemy.hp = 0;
         } else {
@@ -181,12 +296,87 @@ export class GameEngine {
        return e.hp > 0;
     });
 
-    // Core Regen
-    if (core.hp < core.maxHp) {
-      core.hp = Math.min(core.maxHp, core.hp + core.regen * deltaTime);
+    // Special Cores Passives
+    if (core.id.includes('overheat') || core.id.includes('rampage') || core.id.includes('berserk')) {
+       core.hp = Math.max(1, core.hp - 2 * deltaTime);
+       if (core.attackDamage < 150) {
+          core.attackDamage += 0.5 * deltaTime;
+       }
+    } else if (core.hp < core.maxHp) {
+       core.hp = Math.min(core.maxHp, core.hp + core.regen * deltaTime);
     }
 
-    // 4. Core Shooting
+    // 4. Update Summons
+    this.summons.forEach(s => {
+       s.lifeTime += deltaTime;
+       if (s.type === 'DRONE' || s.type === 'NANOBOT' || s.type === 'CLONE') {
+          // Find target
+          let target = this.enemies.find(e => e.id === s.targetId);
+          if (!target || target.hp <= 0) {
+             const potential = this.enemies.filter(e => e.hp > 0);
+             if (potential.length > 0) {
+                target = potential.sort((a,b) => (Math.sqrt((a.x-s.x)**2 + (a.y-s.y)**2) - Math.sqrt((b.x-s.x)**2 + (b.y-s.y)**2)))[0];
+                s.targetId = target.id;
+             }
+          }
+          if (target) {
+            const dx = target.x - s.x;
+            const dy = target.y - s.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist < 20) {
+               s.lastAttackTime += deltaTime * 1000;
+               if (s.lastAttackTime > (s.type === 'NANOBOT' ? 500 : 1000)) {
+                  target.hp -= s.damage;
+                  s.lastAttackTime = 0;
+               }
+            } else {
+               const moveSpeed = s.speed * deltaTime * 60;
+               s.x += (dx / dist) * moveSpeed;
+               s.y += (dy / dist) * moveSpeed;
+            }
+          }
+       } else if (s.type === 'TURRET') {
+           s.lastAttackTime += deltaTime * 1000;
+           if (s.lastAttackTime > 1000) {
+              const target = this.enemies.find(e => Math.sqrt((e.x-s.x)**2 + (e.y-s.y)**2) < s.radius);
+              if (target) {
+                 this.projectiles.push({
+                    id: Math.random().toString(36),
+                    x: s.x, y: s.y, targetId: target.id, damage: s.damage, speed: 1.0, color: s.color, type: 'NORMAL'
+                 });
+                 s.lastAttackTime = 0;
+              }
+           }
+       } else if (s.type === 'BLACKHOLE' || s.type === 'SATELLITE' || s.type === 'ORBITAL_LASER') {
+           // Pull or damage
+           const r = s.type === 'BLACKHOLE' ? s.radius : (s.type === 'ORBITAL_LASER' ? 60 : s.radius * 0.5);
+           this.enemies.forEach(e => {
+              const dist = Math.sqrt((e.x-s.x)**2 + (e.y-s.y)**2);
+              if (s.type === 'ORBITAL_LASER') {
+                  // Laser Sweep logic
+                  if (Math.abs(e.x - s.x) < 40) { e.hp -= s.damage * deltaTime; }
+              } else if (dist < r) {
+                 if (s.type === 'BLACKHOLE') {
+                    e.x -= (e.x - s.x) * 2 * deltaTime;
+                    e.y -= (e.y - s.y) * 2 * deltaTime;
+                 }
+                 e.hp -= s.damage * deltaTime;
+              }
+           });
+           if (s.type === 'SATELLITE') {
+              s.angle = (s.angle || 0) + s.speed * deltaTime;
+              s.x = CORE_X + Math.cos(s.angle) * s.distance!;
+              s.y = CORE_Y + Math.sin(s.angle) * s.distance!;
+           } else if (s.type === 'ORBITAL_LASER') {
+              // sweep across the screen
+              s.x = (s.lifeTime / s.maxLifeTime) * CANVAS_SIZE;
+           }
+       }
+    });
+
+    this.summons = this.summons.filter(s => s.lifeTime < s.maxLifeTime);
+
+    // 5. Core Shooting
     const actualAttackSpeed = this.isUltActive && core.type === 'ATTACK' ? core.attackSpeed * 0.2 : core.attackSpeed;
     this.lastShotTime += deltaTime * 1000;
     
@@ -245,10 +435,10 @@ export class GameEngine {
           if (p.hitSet) p.hitSet.add(target.id);
 
           // Apply special effects on hit based on projectile type
-          if (p.type === 'EXPLOSIVE') {
+          if (p.type === 'EXPLOSIVE' || p.type === 'MISSILE') {
              this.enemies.forEach(e => {
                 const edist = Math.sqrt((e.x - target!.x)**2 + (e.y - target!.y)**2);
-                if (edist < (p.explosionRadius || 50)) {
+                if (edist < (p.explosionRadius || (p.type === 'MISSILE' ? 40 : 50))) {
                    e.hp -= p.damage * 0.5;
                 }
              });
@@ -318,6 +508,18 @@ export class GameEngine {
           type = 'SNIPER'; speed = 1.5; dmg *= 2;
       }
 
+      // BALLISTIC_AMP and PHOTON_AMP from Modules
+      const ballisticCount = this.modules.filter(m => m.type === 'BALLISTIC_AMP').length;
+      if (ballisticCount > 0) {
+         count += ballisticCount;
+         if (type === 'NORMAL') type = 'PIERCE';
+      }
+      
+      const photonCount = this.modules.filter(m => m.type === 'PHOTON_AMP').length;
+      if (photonCount > 0 && type === 'LASER_BEAM') {
+         dmg *= (1 + 0.2 * photonCount);
+      }
+
       if (target) {
          for (let i = 0; i < count; i++) {
             this.projectiles.push({
@@ -335,10 +537,127 @@ export class GameEngine {
       }
   }
 
-  triggerUltimate() {
+  triggerUltimate(core: CoreStats) {
     this.isUltActive = true;
     this.usedUltThisWave = true;
-    this.ultTimer = 5; // 5 seconds duration
+    this.ultTimer = 5; // default 5 seconds duration
+    this.activeUltName = core.ultName?.toUpperCase() || null;
+
+    const ult = this.activeUltName || '';
+
+    if (ult.includes('BLACK HOLE') || ult.includes('EVENT HORIZON') || ult.includes('COLLAPSE')) {
+       // 블랙홀: 적 흡입
+       this.summons.push({
+          id: Math.random().toString(36), type: 'BLACKHOLE',
+          x: CORE_X, y: CORE_Y, damage: core.attackDamage * 10,
+          speed: 0, radius: 400, lifeTime: 0, maxLifeTime: 5, color: '#111827', lastAttackTime: 0
+       });
+    } else if (ult.includes('LASER') || ult.includes('BEAM') || ult.includes('CUTTER') || ult.includes('DEATH RAY')) {
+       // 궤도 레이저: 화면 횡단 초고화력 공격
+       this.ultTimer = 2; // shrt duration
+       this.summons.push({
+           id: Math.random().toString(36), type: 'ORBITAL_LASER',
+           x: CORE_X, y: CORE_Y, damage: core.attackDamage * 50,
+           speed: 0, radius: CANVAS_SIZE, lifeTime: 0, maxLifeTime: 2, color: '#EF4444', lastAttackTime: 0
+       });
+    } else if (ult.includes('STORM') || ult.includes('MISSILE') || ult.includes('SWARM TACTIC') || ult.includes('BULLET HELL')) {
+       // 미사일 폭풍
+       this.ultTimer = 1;
+       for (let i=0; i<30; i++) {
+          const target = this.enemies[Math.floor(Math.random() * this.enemies.length)];
+          this.projectiles.push({
+             id: Math.random().toString(36), targetId: target ? target.id : 'CORE',
+             x: Math.random() * CANVAS_SIZE, y: Math.random() * CANVAS_SIZE,
+             damage: core.attackDamage * 5, speed: 4.0, color: '#F97316', type: 'MISSILE'
+          });
+       }
+    } else if (ult.includes('TIME') || ult.includes('STASIS') || ult.includes('REWIND')) {
+       // 시간 정지
+       this.enemies.forEach(e => e.freezeTimer = 5);
+       this.ultTimer = 5;
+    } else if (ult.includes('EMP') || ult.includes('LIGHTNING') || ult.includes('SHOCKWAVE')) {
+       // 전자기 폭풍
+       this.ultTimer = 1;
+       this.enemies.forEach(e => {
+          e.hp -= core.attackDamage * 15;
+          e.stunTimer = 2;
+       });
+    } else if (ult.includes('NEBULA') || ult.includes('PULSE') || ult.includes('BURST')) {
+       // 성운 폭발 (코어 주변 광역 폭발)
+       this.ultTimer = 1;
+       this.enemies.forEach(e => {
+          const dx = CORE_X - e.x;
+          const dy = CORE_Y - e.y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < 300) { e.hp -= core.attackDamage * 30; }
+       });
+    } else if (ult.includes('SOLAR') || ult.includes('SUN') || ult.includes('FLARE') || ult.includes('PLASMA') || ult.includes('ERUPTION')) {
+       // 태양섬광 (빛과 화염 피해)
+       this.ultTimer = 1;
+       this.enemies.forEach(e => {
+          e.hp -= core.attackDamage * 20;
+          e.burnTimer = 5;
+          e.burnDamage = core.attackDamage * 2;
+       });
+    } else if (ult.includes('VOID') || ult.includes('SILENCE') || ult.includes('DOOM')) {
+       // 공허 파동 (적 특수능력 제거 및 피해)
+       this.ultTimer = 2;
+       this.enemies.forEach(e => {
+          e.hp -= core.attackDamage * 10;
+          e.speed = Math.min(e.speed, 0.5); // 영구 감속 효과
+          e.damage = Math.max(1, Math.floor(e.damage * 0.5)); // 공격력 감소
+       });
+    } else if (ult.includes('RIFT') || ult.includes('DIMENSION')) {
+       // 차원 균열 (적 일부를 뒤로 되돌림)
+       this.ultTimer = 1;
+       this.enemies.forEach(e => {
+          const angle = Math.random() * Math.PI * 2;
+          e.x += Math.cos(angle) * 300;
+          e.y += Math.sin(angle) * 300;
+          e.hp -= core.attackDamage * 5;
+       });
+    } else if (ult.includes('NANO') || ult.includes('INFECTION')) {
+       // 나노 범람 (적 전체 나노 감염)
+       this.ultTimer = 5;
+       this.enemies.forEach(e => {
+          e.burnTimer = 8;
+          e.burnDamage = core.attackDamage * 3;
+       });
+    } else if (ult.includes('DRONE') || ult.includes('HIVE') || ult.includes('ARMY')) {
+       // 드론 출격
+       for(let i=0; i<20; i++) {
+          this.summons.push({
+             id: Math.random().toString(36), type: 'DRONE',
+             x: CORE_X, y: CORE_Y, damage: core.attackDamage * 2,
+             speed: 3.0, radius: 0, lifeTime: 0, maxLifeTime: 10,
+             color: core.color, lastAttackTime: 0
+          });
+       }
+    } else if (ult.includes('JUDGEMENT') || ult.includes('EXECUTION') || ult.includes('SMITE') || ult.includes('ASSASSINATION')) {
+       // 심판 포격 (보스와 엘리트 집중 타격 / 가장 체력 많은 적)
+       this.ultTimer = 1;
+       const targets = this.enemies.sort((a,b) => b.hp - a.hp).slice(0, 5);
+       targets.forEach(t => t.hp -= core.attackDamage * 50);
+    } else if (ult.includes('ZERO') || ult.includes('FREEZE') || ult.includes('BLIZZARD')) {
+       // 절대영도 (전체 감속과 빙결)
+       this.ultTimer = 1;
+       this.enemies.forEach(e => {
+          e.freezeTimer = 5;
+          e.hp -= core.attackDamage * 10;
+       });
+    } else if (ult.includes('BARRIER') || ult.includes('SHIELD') || ult.includes('AEGIS') || ult.includes('CITADEL') || ult.includes('FORTRESS')) {
+       // 방벽 전개 (대형 보호막 생성)
+       this.ultTimer = 8;
+       core.shield = Math.min((core.maxShield || 0) * 3, (core.shield || 0) + 500); // 일시적 대량 쉴드
+    } else if (ult.includes('SUPERNOVA')) {
+       // 초신성 폭발 (화면 전체 대폭발)
+       this.ultTimer = 1;
+       this.enemies.forEach(e => e.hp -= core.attackDamage * 60);
+    } else {
+       // 기본 궁극기 로직 (매치 안되는 경우)
+       this.ultTimer = 2;
+       this.enemies.forEach(e => e.hp -= core.attackDamage * 20);
+    }
   }
 
   spawnEnemy(wave: number, core: CoreStats) {
@@ -477,7 +796,7 @@ export class GameEngine {
       ctx.shadowBlur = 10;
       ctx.shadowColor = m.color;
       ctx.beginPath();
-      ctx.arc(mx, my, m.type === 'LENS' ? 8 : 5, 0, Math.PI * 2);
+      ctx.arc(mx, my, m.type.includes('LENS') || m.type.includes('NEST') || m.type.includes('RING') ? 8 : 5, 0, Math.PI * 2);
       ctx.fill();
       ctx.shadowBlur = 0;
       
@@ -488,6 +807,41 @@ export class GameEngine {
       ctx.lineTo(mx, my);
       ctx.stroke();
       ctx.globalAlpha = 1.0;
+    });
+
+    // Draw Summons
+    this.summons.forEach(s => {
+       ctx.fillStyle = s.color;
+       ctx.shadowBlur = s.type === 'BLACKHOLE' ? 50 : 10;
+       ctx.shadowColor = s.color;
+       ctx.beginPath();
+       if (s.type === 'BLACKHOLE') {
+          ctx.globalAlpha = 0.8;
+          ctx.arc(s.x, s.y, s.radius * 0.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 0.2;
+          ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1.0;
+       } else if (s.type === 'ORBITAL_LASER') {
+          ctx.globalAlpha = 0.8;
+          ctx.rect(s.x - 40, 0, 80, CANVAS_SIZE);
+          ctx.fill();
+          ctx.fillStyle = '#FFFFFF';
+          ctx.rect(s.x - 10, 0, 20, CANVAS_SIZE);
+          ctx.fill();
+          ctx.globalAlpha = 1.0;
+       } else if (s.type === 'TURRET') {
+          ctx.rect(s.x - 8, s.y - 8, 16, 16);
+          ctx.fill();
+       } else if (s.type === 'DRONE' || s.type === 'SATELLITE') {
+          ctx.moveTo(s.x, s.y - 6); ctx.lineTo(s.x+4, s.y+4); ctx.lineTo(s.x-4, s.y+4);
+          ctx.fill();
+       } else if (s.type === 'NANOBOT') {
+          ctx.arc(s.x, s.y, 2, 0, Math.PI * 2);
+          ctx.fill();
+       }
+       ctx.shadowBlur = 0;
     });
 
     // Draw Enemies

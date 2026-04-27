@@ -15,6 +15,7 @@ export interface GameState {
   globalArtifacts: string[];
   achievements: Record<string, number>;
   ultCharge: number;
+  availableModules: string[];
   artifacts: string[]; // run tacticals
   pendingArtifact: boolean;
   pendingEvolution: boolean;
@@ -33,6 +34,9 @@ export interface CoreStats {
   range: number;
   defense: number;
   regen: number;
+  shield?: number;
+  maxShield?: number;
+  shieldRegen?: number;
   evolutionLevel: number;
   color: string;
   ultName?: string;
@@ -41,6 +45,23 @@ export interface CoreStats {
   baseCoreId?: string;
   evolutionCondition?: string;
   description?: string;
+}
+
+export interface Summon {
+  id: string;
+  type: 'DRONE' | 'TURRET' | 'BLACKHOLE' | 'NANOBOT' | 'SATELLITE' | 'CLONE' | 'ORBITAL_LASER';
+  x: number;
+  y: number;
+  targetId?: string;
+  damage: number;
+  lifeTime: number;
+  maxLifeTime: number;
+  speed: number;
+  radius: number;
+  color: string;
+  lastAttackTime: number;
+  angle?: number;
+  distance?: number;
 }
 
 export type EnemyType = 'RUNNER' | 'TANKER' | 'SHOOTER' | 'SWARM' | 'BOSS';
@@ -75,13 +96,13 @@ export interface Projectile {
   damage: number;
   speed: number;
   color: string;
-  type: 'NORMAL' | 'PIERCE' | 'EXPLOSIVE' | 'ENEMY' | 'CHAIN' | 'FRAG' | 'SNIPER' | 'LASER_BEAM' | 'BOUNCE';
+  type: 'NORMAL' | 'PIERCE' | 'EXPLOSIVE' | 'ENEMY' | 'CHAIN' | 'FRAG' | 'SNIPER' | 'LASER_BEAM' | 'BOUNCE' | 'MISSILE';
   chainCount?: number;
   explosionRadius?: number;
   hitSet?: Set<string>;
 }
 
-export type ModuleType = 'LASER' | 'LENS' | 'SHIELD' | 'DRONE';
+export type ModuleType = 'LASER_SAT' | 'SHIELD_SAT' | 'GRAVITY_LENS' | 'COOLING_COIL' | 'LIGHTNING_AMP' | 'HARVESTER' | 'DRONE_NEST' | 'MISSILE_POD' | 'REFLECTOR' | 'RIFT_LENS' | 'FLAME_NOZZLE' | 'NANO_SPRAYER' | 'PHOTON_AMP' | 'ABSORPTION_RING' | 'EXECUTION_LENS' | 'TIME_PENDULUM' | 'BALLISTIC_AMP' | 'REWARD_PRINTER' | 'PURIFY_COIL' | 'OMEGA_RING';
 
 export interface OrbitalModule {
   id: string;
@@ -91,6 +112,7 @@ export interface OrbitalModule {
   rotationSpeed: number;
   damage: number;
   color: string;
+  lastActionTime?: number;
 }
 
 export interface UpgradeOption {
