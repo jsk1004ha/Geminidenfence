@@ -190,6 +190,88 @@ export class GameEngine {
         enemy.burnTimer -= deltaTime;
         enemy.hp -= (enemy.burnDamage || 0) * deltaTime;
       }
+      
+      // Elite / Special Mechanics
+      if (enemy.regen && enemy.regen > 0) {
+         enemy.hp = Math.min(enemy.maxHp, enemy.hp + enemy.regen * deltaTime);
+      }
+      if (enemy.type === 'SHIELDER' && enemy.shield !== undefined && enemy.maxShield !== undefined && enemy.shield < enemy.maxShield) {
+         // Regent shield out of combat or slowly
+         enemy.shield += enemy.maxShield * 0.05 * deltaTime;
+      }
+
+      // Blinker mechanic
+      if (enemy.type === 'BLINKER') {
+         enemy.blinkTimer = (enemy.blinkTimer || 0) + deltaTime;
+         if (enemy.blinkTimer > 3) {
+            const dx = CORE_X - enemy.x;
+            const dy = CORE_Y - enemy.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > 100) {
+               enemy.x += (dx / dist) * 100;
+               enemy.y += (dy / dist) * 100;
+            }
+            enemy.blinkTimer = 0;
+         }
+      }
+      
+      // Charger / Dasher mechanics
+      if (enemy.type === 'CHARGER' || enemy.type === 'DASHER' || enemy.type === 'LIGHTNING_BUG') {
+         enemy.dashCooldown = (enemy.dashCooldown || 0) + deltaTime;
+         const threshold = enemy.type === 'LIGHTNING_BUG' ? 1.5 : (enemy.type === 'DASHER' ? 2 : 4);
+         if (enemy.dashCooldown > threshold) {
+            const dx = CORE_X - enemy.x;
+            const dy = CORE_Y - enemy.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > 50) {
+               const dashDist = enemy.type === 'LIGHTNING_BUG' ? 150 : 80;
+               enemy.x += (dx / dist) * Math.min(dist, dashDist);
+               enemy.y += (dy / dist) * Math.min(dist, dashDist);
+            }
+            // phase dash makes them momentarily invincible
+            if (enemy.type === 'LIGHTNING_BUG') { enemy.invincibleTimer = 0.5; }
+            enemy.dashCooldown = 0;
+         }
+      }
+
+      // Ghost / Phase mechanics
+      if (enemy.type === 'GHOST' || enemy.type === 'PHASE') {
+         enemy.phaseTimer = (enemy.phaseTimer || 0) + deltaTime;
+         if (enemy.phaseTimer > 5) {
+            enemy.invincibleTimer = enemy.type === 'GHOST' ? 2.0 : 1.0;
+            enemy.phaseTimer = 0;
+         }
+      }
+      if (enemy.invincibleTimer && enemy.invincibleTimer > 0) {
+         enemy.invincibleTimer -= deltaTime;
+      }
+
+      // Illusion mechanics
+      if (enemy.type === 'ILLUSION') {
+         enemy.illusionTimer = (enemy.illusionTimer || 0) + deltaTime;
+         if (enemy.illusionTimer > 7 && this.enemies.length < 50) {
+            // Spawn clone
+            this.enemies.push({
+               ...enemy,
+               id: Math.random().toString(36), hp: enemy.maxHp * 0.2, maxHp: enemy.maxHp * 0.2, type: 'CLONE_ILLUSION', name: 'ILLUSION CLONE'
+            });
+            enemy.illusionTimer = 0;
+         }
+      }
+
+      // Nest mechanics
+      if (enemy.type === 'NEST') {
+         enemy.summonTimer = (enemy.summonTimer || 0) + deltaTime;
+         if (enemy.summonTimer > 5) {
+            // Spawn swarm
+            this.enemies.push({
+               id: Math.random().toString(36), type: 'SWARM', name: 'SWARM', isBoss: false,
+               x: enemy.x + (Math.random()-0.5)*20, y: enemy.y + (Math.random()-0.5)*20,
+               hp: 5, maxHp: 5, speed: 1.5, damage: 1, reward: 0, angle: 0, radius: 5, defense: 0
+            });
+            enemy.summonTimer = 0;
+         }
+      }
 
       const dx = CORE_X - enemy.x;
       const dy = CORE_Y - enemy.y;
@@ -203,18 +285,36 @@ export class GameEngine {
       }
       
       if (dist > 35) {
-        // Shooters stop and shoot
-        if (enemy.type === 'SHOOTER' && dist < 200) {
-           enemy.lastAttackTime = (enemy.lastAttackTime || 0) + deltaTime * 1000;
-           if (enemy.lastAttackTime > 2000) {
+        // Ranged enemies
+        const isRanged = enemy.type === 'SHOOTER' || enemy.type === 'SNIPER' || enemy.type === 'JAMMER';
+        const range = enemy.type === 'SNIPER' ? 350 : 200;
+
+        if (isRanged && dist < range) {
+           enemy.shootTimer = (enemy.shootTimer || 0) + deltaTime * 1000;
+           const shootInterval = enemy.type === 'SNIPER' ? 4000 : 2000;
+           if (enemy.shootTimer > shootInterval) {
+              const projDmg = enemy.type === 'SNIPER' ? enemy.damage * 3 : enemy.damage;
+              const projColor = enemy.type === 'JAMMER' ? '#A855F7' : '#FF4D00';
               this.projectiles.push({
                 id: Math.random().toString(36),
                 x: enemy.x, y: enemy.y, targetId: 'CORE',
-                damage: enemy.damage, speed: 0.3,
-                color: '#FF4D00', type: 'ENEMY'
+                damage: projDmg, speed: enemy.type === 'SNIPER' ? 0.8 : 0.3,
+                color: projColor, type: 'ENEMY'
               });
-              enemy.lastAttackTime = 0;
+              enemy.shootTimer = 0;
            }
+        } else if (enemy.type === 'GOLD_SLIME') {
+           // Run away from core
+           let speedMult = this.isUltActive && core.type === 'DEFENSE' ? 0.2 : 1; 
+           speedMult *= enemiesSpeedMult;
+           if (enemy.slowTimer && enemy.slowTimer > 0) speedMult *= (1 - (enemy.slowAmount || 0));
+           if ((enemy.freezeTimer && enemy.freezeTimer > 0) || (enemy.stunTimer && enemy.stunTimer > 0)) speedMult = 0;
+           
+           enemy.x -= (dx / dist) * enemy.speed * deltaTime * 60 * speedMult;
+           enemy.y -= (dy / dist) * enemy.speed * deltaTime * 60 * speedMult;
+           
+           // If they get too far, they "escape"
+           if (dist > CANVAS_SIZE) enemy.hp = 0; // dies without dropping reward
         } else {
           // Move towards core
           let speedMult = this.isUltActive && core.type === 'DEFENSE' ? 0.2 : 1; 
@@ -234,32 +334,46 @@ export class GameEngine {
              enemy.y -= (dy / dist) * 50;
           }
 
-          enemy.x += (dx / dist) * enemy.speed * deltaTime * 60 * speedMult;
-          enemy.y += (dy / dist) * enemy.speed * deltaTime * 60 * speedMult;
+          if (enemy.type === 'SKIMMER' && dist > 150) {
+             const angleToCore = Math.atan2(dy, dx);
+             const skimAngle = angleToCore + Math.PI / 4 * (enemy.id.charCodeAt(0)%2===0?1:-1);
+             enemy.x += Math.cos(skimAngle) * enemy.speed * deltaTime * 60 * speedMult;
+             enemy.y += Math.sin(skimAngle) * enemy.speed * deltaTime * 60 * speedMult;
+          } else {
+             enemy.x += (dx / dist) * enemy.speed * deltaTime * 60 * speedMult;
+             enemy.y += (dy / dist) * enemy.speed * deltaTime * 60 * speedMult;
+          }
         }
       } else {
         // Hit Core
-        const actualDmg = Math.max(1, enemy.damage - core.defense);
-        onCoreDamage(actualDmg);
-        
-        // REFLECTOR Module
-        const reflectorCount = this.modules.filter(m => m.type === 'REFLECTOR').length;
-        if (reflectorCount > 0) {
-           enemy.hp -= actualDmg * reflectorCount * 2;
-        }
-
-        // ABSORPTION_RING Module
-        const absorbCount = this.modules.filter(m => m.type === 'ABSORPTION_RING').length;
-        if (absorbCount > 0 && core.hp < core.maxHp) {
-           core.hp = Math.min(core.maxHp, core.hp + absorbCount * 2);
-        }
-
-        if (enemy.type !== 'BOSS') {
-          enemy.hp = 0;
+        if (enemy.type === 'THIEF') {
+           // Thief steals coins instead of doing damage
+           // Handled in main app or just reduce reward
+           onCoreDamage(1); // minimal damage
+           enemy.hp = 0; // Dies when hitting core
         } else {
-          // Boss just keeps dealing damage over time
-          enemy.x -= (dx / dist) * 10;
-          enemy.y -= (dy / dist) * 10;
+           const actualDmg = Math.max(1, enemy.damage - core.defense);
+           onCoreDamage(actualDmg);
+           
+           // REFLECTOR Module
+           const reflectorCount = this.modules.filter(m => m.type === 'REFLECTOR').length;
+           if (reflectorCount > 0) {
+              enemy.hp -= actualDmg * reflectorCount * 2;
+           }
+
+           // ABSORPTION_RING Module
+           const absorbCount = this.modules.filter(m => m.type === 'ABSORPTION_RING').length;
+           if (absorbCount > 0 && core.hp < core.maxHp) {
+              core.hp = Math.min(core.maxHp, core.hp + absorbCount * 2);
+           }
+
+           if (!enemy.isBoss && enemy.type !== 'BOSS') {
+             enemy.hp = 0;
+           } else {
+             // Boss just keeps dealing damage over time
+             enemy.x -= (dx / dist) * 10;
+             enemy.y -= (dy / dist) * 10;
+           }
         }
       }
     });
@@ -428,37 +542,61 @@ export class GameEngine {
         
         if (dist < 15) {
           // On Hit Logic
-          let actualDmg = p.damage;
-          if (target.vulnTimer && target.vulnTimer > 0) actualDmg *= 1.5;
-          target.hp -= actualDmg;
-          
-          if (p.hitSet) p.hitSet.add(target.id);
+          if (target.evasion && Math.random() < target.evasion) {
+             // Avoided
+             if (p.type !== 'PIERCE' && p.type !== 'LASER_BEAM') p.damage = 0;
+          } else {
+              let actualDmg = p.damage;
+              if (target.defense) actualDmg = Math.max(1, actualDmg - target.defense);
+              
+              if (target.shield !== undefined && target.shield > 0) {
+                  if (target.shield >= actualDmg) {
+                      target.shield -= actualDmg;
+                      actualDmg = 0;
+                  } else {
+                      actualDmg -= target.shield;
+                      target.shield = 0;
+                  }
+              }
 
-          // Apply special effects on hit based on projectile type
-          if (p.type === 'EXPLOSIVE' || p.type === 'MISSILE') {
-             this.enemies.forEach(e => {
-                const edist = Math.sqrt((e.x - target!.x)**2 + (e.y - target!.y)**2);
-                if (edist < (p.explosionRadius || (p.type === 'MISSILE' ? 40 : 50))) {
-                   e.hp -= p.damage * 0.5;
-                }
-             });
-             p.damage = 0;
-          } else if (p.type === 'CHAIN' && (p.chainCount || 0) > 0) {
-             p.chainCount! -= 1;
-             p.targetId = 'random'; // will find new target next frame
-          } else if (p.type === 'FRAG') {
-             p.damage = 0;
-          } else if (p.type !== 'PIERCE' && p.type !== 'LASER_BEAM') {
-             p.damage = 0;
+              if (actualDmg > 0) {
+                 if (target.vulnTimer && target.vulnTimer > 0) actualDmg *= 1.5;
+                 target.hp -= actualDmg;
+              }
+              
+              if (p.hitSet) p.hitSet.add(target.id);
+
+              // Apply special effects on hit based on projectile type
+              if (p.type === 'EXPLOSIVE' || p.type === 'MISSILE') {
+                 this.enemies.forEach(e => {
+                    const edist = Math.sqrt((e.x - target!.x)**2 + (e.y - target!.y)**2);
+                    if (edist < (p.explosionRadius || (p.type === 'MISSILE' ? 40 : 50))) {
+                       let splDmg = p.damage * 0.5;
+                       if (e.defense) splDmg = Math.max(1, splDmg - e.defense);
+                       if (e.shield !== undefined && e.shield > 0) {
+                          e.shield = Math.max(0, e.shield - splDmg);
+                          splDmg = 0; // simplistic, assume shield absorbs
+                       }
+                       e.hp -= splDmg;
+                    }
+                 });
+                 p.damage = 0;
+              } else if (p.type === 'CHAIN' && (p.chainCount || 0) > 0) {
+                 p.chainCount! -= 1;
+                 p.targetId = 'random'; // will find new target next frame
+              } else if (p.type === 'FRAG') {
+                 p.damage = 0;
+              } else if (p.type !== 'PIERCE' && p.type !== 'LASER_BEAM') {
+                 p.damage = 0;
+              }
+
+              // Core specific specific on-hit (Vampire, Furnace, Frost, Silence)
+              if (core.id.includes('vampire') || core.id.includes('bloodstone')) core.hp = Math.min(core.maxHp, core.hp + actualDmg * 0.1);
+              if (core.id.includes('furnace')) { target.burnTimer = 3; target.burnDamage = core.attackDamage * 0.2; }
+              if (core.id.includes('frost')) { target.slowTimer = 2; target.slowAmount = 0.5; }
+              if (core.id.includes('time')) { if(Math.random()<0.1) target.freezeTimer = 2; }
+              if (core.id.includes('curse')) { target.vulnTimer = 3; }
           }
-
-          // Core specific specific on-hit (Vampire, Furnace, Frost, Silence)
-          if (core.id.includes('vampire') || core.id.includes('bloodstone')) core.hp = Math.min(core.maxHp, core.hp + actualDmg * 0.1);
-          if (core.id.includes('furnace')) { target.burnTimer = 3; target.burnDamage = core.attackDamage * 0.2; }
-          if (core.id.includes('frost')) { target.slowTimer = 2; target.slowAmount = 0.5; }
-          if (core.id.includes('time')) { if(Math.random()<0.1) target.freezeTimer = 2; }
-          if (core.id.includes('curse')) { target.vulnTimer = 3; }
-
         } else {
           // Move towards target
           let spd = p.speed * deltaTime * 1000;
@@ -664,46 +802,94 @@ export class GameEngine {
     const angle = Math.random() * Math.PI * 2;
     const dist = CANVAS_SIZE / 2 + 50;
     
-    // Choose type based on wave
-    const rand = Math.random();
-    let type: EnemyType = 'RUNNER';
-    let hpMult = 1;
-    let spdMult = 1;
-    let dmgMult = 1;
-
-    if (wave > 5 && rand < 0.2) {
-       type = 'TANKER';
-       hpMult = 4; spdMult = 0.5; dmgMult = 2;
-    } else if (wave > 10 && rand < 0.4) {
-       type = 'SHOOTER';
-       hpMult = 1.5; spdMult = 0.7; dmgMult = 1.5;
-    } else if (wave > 15 && rand < 0.6) {
-       type = 'SWARM';
-       hpMult = 0.5; spdMult = 1.5; dmgMult = 0.5;
-    }
-
+    let baseHp = 10 + wave * 5;
+    let baseSpd = 0.05 + Math.random() * 0.03;
+    let baseDmg = 5 + Math.floor(wave / 3);
     let reward = Math.floor(1 + wave / 5);
     
+    // Type selection based on wave unlocks
+    const typesByTier = [
+       // Tier 0 (Wave 1+)
+       [{ t: 'WALKER', h: 1, s: 1, d: 1 }, { t: 'RUNNER', h: 0.5, s: 1.5, d: 0.5 }, { t: 'CRAWLER', h: 0.5, s: 0.4, d: 0.5 }],
+       // Tier 1 (Wave 5+)
+       [{ t: 'TANKER', h: 4, s: 0.5, d: 2 }, { t: 'SHOOTER', h: 1, s: 0.6, d: 1.5 }, { t: 'SPRINTER', h: 0.3, s: 2.0, d: 0.5 }, { t: 'STONEBACK', h: 2, s: 0.5, d: 1 }],
+       // Tier 2 (Wave 10+)
+       [{ t: 'SWARM', h: 0.3, s: 1.8, d: 0.3 }, { t: 'CHARGER', h: 1.5, s: 0.8, d: 1.5 }, { t: 'SLASHER', h: 1, s: 1.2, d: 3 }, { t: 'SKIMMER', h: 0.8, s: 1.5, d: 1 }],
+       // Tier 3 (Wave 15+)
+       [{ t: 'BRUTE', h: 3, s: 0.8, d: 3 }, { t: 'ARMORED', h: 2, s: 0.5, d: 1 }, { t: 'DASHER', h: 1, s: 0.8, d: 1 }, { t: 'EVADER', h: 0.8, s: 1.3, d: 1 }],
+       // Tier 4 (Wave 20+)
+       [{ t: 'SHIELDER', h: 1.5, s: 0.7, d: 1 }, { t: 'GHOST', h: 0.8, s: 1.1, d: 0.8 }, { t: 'PHASE', h: 0.6, s: 1.5, d: 1 }, { t: 'NEEDLE', h: 0.5, s: 2.2, d: 2 }],
+       // Tier 5 (Wave 25+)
+       [{ t: 'NEST', h: 3, s: 0.2, d: 0 }, { t: 'BLINKER', h: 0.8, s: 1.0, d: 1 }, { t: 'LIGHTNING_BUG', h: 0.4, s: 2.5, d: 0.5 }, { t: 'ILLUSION', h: 1.0, s: 1.0, d: 1 }],
+       // Tier 6 (Wave 30+)
+       [{ t: 'JAMMER', h: 1.5, s: 0.5, d: 1 }, { t: 'THIEF', h: 0.8, s: 2.0, d: 0.5 }, { t: 'GOLD_SLIME', h: 10, s: 1.2, d: 0 }]
+    ];
+
+    let availablePool: any[] = [];
+    for(let i=0; i<typesByTier.length; i++) {
+        if (wave >= i * 5 || i === 0) {
+           availablePool.push(...typesByTier[i]);
+        }
+    }
+    
+    // Fallback logic to pick a random type
+    const picked = availablePool[Math.floor(Math.random() * availablePool.length)];
+    let type = picked.t;
+    let hpMult = picked.h;
+    let spdMult = picked.s;
+    let dmgMult = picked.d;
+
+    let finalHp = baseHp * hpMult;
+    let finalSpd = baseSpd * spdMult;
+    let finalDmg = baseDmg * dmgMult;
+    
+    let isElite = false;
+    let prefix = '';
+    let defense = 0; let shield = 0; let maxShield = 0;
+    let evasion = 0; let regen = 0; let reflect = 0;
+
+    // Elite generation
+    if (wave > 15 && Math.random() < 0.1) {
+       isElite = true;
+       const prefixes = ['거대한', '재빠른', '무장한', '황금의', '재생하는', '회피하는'];
+       prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+       
+       if (prefix === '거대한') { finalHp *= 3; finalSpd *= 0.8; }
+       if (prefix === '재빠른') { finalSpd *= 2; }
+       if (prefix === '무장한') { defense = Math.floor(wave / 2); finalHp *= 1.5; }
+       if (prefix === '황금의') { reward *= 5; finalHp *= 2; }
+       if (prefix === '재생하는') { regen = finalHp * 0.05; }
+       if (prefix === '회피하는') { evasion = 0.3; }
+    }
+
+    if (type === 'ARMORED') defense += Math.floor(wave / 3);
+    if (type === 'SHIELDER') { maxShield = finalHp; shield = finalHp; }
+    if (type === 'GOLD_SLIME') { reward *= 10; }
+    
     // Economic core features
-    if (core.id.includes('greed')) {
-       reward *= 3; hpMult *= 1.5; dmgMult *= 1.5;
-    }
-    if (core.id.includes('gold')) {
-       reward *= 5; // Golden core pure reward
-    }
-    if (core.id.includes('harvest') && Math.random() < 0.1) {
-       type = 'TANKER'; hpMult *= 2; reward *= 3; // Harvest forces more elites
-    }
+    if (core.id.includes('greed')) { reward *= 3; finalHp *= 1.5; finalDmg *= 1.5; }
+    if (core.id.includes('gold')) { reward *= 5; }
+    if (core.id.includes('harvest') && Math.random() < 0.1) { type = 'TANKER'; finalHp *= 2; reward *= 3; }
 
     this.enemies.push({
       id: Math.random().toString(36),
       type: type,
+      name: prefix ? `${prefix} ${type}` : type,
+      prefix: prefix,
+      isBoss: false,
+      isElite: isElite,
       x: CORE_X + Math.cos(angle) * dist,
       y: CORE_Y + Math.sin(angle) * dist,
-      hp: Math.floor((10 + wave * 5) * hpMult),
-      maxHp: Math.floor((10 + wave * 5) * hpMult),
-      speed: (0.05 + Math.random() * 0.03) * spdMult,
-      damage: Math.floor(5 + wave / 3) * dmgMult,
+      hp: Math.floor(finalHp),
+      maxHp: Math.floor(finalHp),
+      defense: defense,
+      shield: shield,
+      maxShield: maxShield,
+      evasion: evasion,
+      regen: regen,
+      reflect: reflect,
+      speed: Math.min(finalSpd, 1.0),
+      damage: Math.floor(finalDmg),
       reward: reward,
       angle: 0,
       radius: dist
@@ -724,12 +910,15 @@ export class GameEngine {
     this.enemies.push({
       id: 'BOSS_' + wave,
       type: 'BOSS',
+      name: `Wave ${wave} Boss`,
+      isBoss: true,
       x: CORE_X + Math.cos(angle) * dist,
       y: CORE_Y + Math.sin(angle) * dist,
       hp: 200 + wave * 50,
       maxHp: 200 + wave * 50,
       speed: 0.02,
       damage: 15 + wave,
+      defense: Math.floor(wave / 2),
       reward: reward,
       angle: 0,
       radius: dist
@@ -848,10 +1037,26 @@ export class GameEngine {
     this.enemies.forEach(e => {
       let color = '#A855F7';
       let size = 8;
+      
+      // Determine color and size
       if (e.type === 'TANKER') { color = '#374151'; size = 12; }
-      else if (e.type === 'SHOOTER') { color = '#a8a29e'; size = 7; } // Distinct color
+      else if (e.type === 'BRUTE') { color = '#7F1D1D'; size = 15; }
+      else if (e.type === 'SHOOTER' || e.type === 'SNIPER') { color = '#a8a29e'; size = e.type === 'SNIPER' ? 10 : 7; }
       else if (e.type === 'SWARM') { color = '#22C55E'; size = 5; }
+      else if (e.type === 'ARMORED') { color = '#64748B'; size = 12; }
+      else if (e.type === 'SHIELDER') { color = '#06B6D4'; size = 10; }
+      else if (e.type === 'NEST') { color = '#C084FC'; size = 14; }
+      else if (e.type === 'JAMMER') { color = '#8B5CF6'; size = 9; }
+      else if (e.type === 'THIEF') { color = '#10B981'; size = 7; }
+      else if (e.type === 'GOLD_SLIME') { color = '#FBED4A'; size = 12; }
+      else if (e.type === 'BLINKER') { color = '#D946EF'; size = 8; }
       else if (e.type === 'BOSS') { color = '#EF4444'; size = 20; }
+      
+      if (e.isElite) {
+         size += 3;
+         ctx.shadowBlur = 15;
+         ctx.shadowColor = '#F59E0B'; // Elite aura
+      }
 
       ctx.fillStyle = color;
       ctx.beginPath();
@@ -862,16 +1067,52 @@ export class GameEngine {
            if(i===0) ctx.moveTo(e.x + Math.cos(a)*size, e.y + Math.sin(a)*size);
            else ctx.lineTo(e.x + Math.cos(a)*size, e.y + Math.sin(a)*size);
          }
+      } else if (e.type === 'ARMORED' || e.type === 'TANKER') {
+         // Rectangle
+         ctx.rect(e.x - size, e.y - size, size * 2, size * 2);
+      } else if (e.type === 'NEST' || e.type === 'SWARM') {
+         // Star or bumpy shape
+         for(let i=0; i<8; i++) {
+            const a = (i/8) * Math.PI*2;
+            const r = i%2===0 ? size : size*0.5;
+            if(i===0) ctx.moveTo(e.x + Math.cos(a)*r, e.y + Math.sin(a)*r);
+            else ctx.lineTo(e.x + Math.cos(a)*r, e.y + Math.sin(a)*r);
+         }
       } else {
          ctx.arc(e.x, e.y, size, 0, Math.PI * 2);
       }
       ctx.fill();
+      ctx.shadowBlur = 0; // reset
       
+      // Draw shield if present
+      if (e.shield !== undefined && e.shield > 0) {
+         ctx.strokeStyle = '#22D3EE';
+         ctx.lineWidth = 2;
+         ctx.beginPath();
+         ctx.arc(e.x, e.y, size + 4, 0, Math.PI * 2);
+         ctx.stroke();
+         ctx.lineWidth = 1;
+      }
+
       // Health bar
       ctx.fillStyle = '#1A1A1E';
       ctx.fillRect(e.x - 10, e.y - size - 10, 20, 3);
       ctx.fillStyle = color;
       ctx.fillRect(e.x - 10, e.y - size - 10, Math.max(0, (e.hp / e.maxHp)) * 20, 3);
+      
+      // Shield bar
+      if (e.shield !== undefined && e.shield > 0 && e.maxShield) {
+         ctx.fillStyle = '#22D3EE';
+         ctx.fillRect(e.x - 10, e.y - size - 13, Math.max(0, (e.shield / e.maxShield)) * 20, 2);
+      }
+
+      // Name for Elite/Boss
+      if ((e.isElite || e.isBoss) && e.name) {
+         ctx.fillStyle = '#FFFFFF';
+         ctx.font = '10px sans-serif';
+         ctx.textAlign = 'center';
+         ctx.fillText(e.name, e.x, e.y - size - 16);
+      }
     });
 
     // Draw Projectiles

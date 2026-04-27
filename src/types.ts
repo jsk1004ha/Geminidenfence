@@ -64,11 +64,13 @@ export interface Summon {
   distance?: number;
 }
 
-export type EnemyType = 'RUNNER' | 'TANKER' | 'SHOOTER' | 'SWARM' | 'BOSS';
+export type EnemyType = string;
 
 export interface Enemy {
   id: string;
   type: EnemyType;
+  name?: string;     // Added for display/flavor
+  prefix?: string;   // Elite prefix (거대한, 재빠른 etc)
   x: number;
   y: number;
   hp: number;
@@ -86,6 +88,25 @@ export interface Enemy {
   slowAmount?: number;
   stunTimer?: number;
   vulnTimer?: number;
+  // Extended mechanics
+  defense?: number;
+  shield?: number;
+  maxShield?: number;
+  evasion?: number;
+  reflect?: number;
+  healTimer?: number;
+  invincibleTimer?: number;
+  dashTimer?: number;
+  blinkTimer?: number;
+  shootTimer?: number;
+  summonTimer?: number;
+  isBoss?: boolean;
+  isElite?: boolean;
+  regen?: number;
+  phaseTimer?: number;
+  cloneTimer?: number;
+  dashCooldown?: number;
+  illusionTimer?: number;
 }
 
 export interface Projectile {
