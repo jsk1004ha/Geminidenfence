@@ -14,6 +14,29 @@ function generateRandomModules() {
 }
 import { GameEngine } from './game/GameEngine';
 
+const EVOLUTION_REQUIREMENTS: Record<string, (ctx: { gameState: GameState; core: CoreStats }) => boolean> = {
+  'supernova-core': ({ gameState }) => (gameState.achievements.boss_kills || 0) >= 1,
+  'singularity-evo-core': ({ gameState }) => gameState.globalArtifacts.includes('ga_3'),
+  'paradox-evo-core': ({ gameState }) => gameState.globalArtifacts.includes('ga_4'),
+  'void-evo-core': ({ gameState }) => gameState.globalArtifacts.includes('ga_6'),
+  'satellite-army': ({ gameState, core }) => core.id === 'orbital-core' && gameState.wave >= 50,
+};
+
+const HIDDEN_CORE_REQUIREMENTS: Record<string, (state: GameState) => boolean> = {
+  'singularity-core': (state) => state.globalArtifacts.includes('ga_3'),
+  'void-core': (state) => state.globalArtifacts.includes('ga_6'),
+  'paradox-core': (state) => state.globalArtifacts.includes('ga_4'),
+  'eclipse-core': (state) => state.unlockedCores.includes('photon-core') && state.unlockedCores.includes('void-core'),
+  'genesis-core': (state) => state.globalArtifacts.includes('ga_20'),
+  'abyss-core': (state) => (state.achievements.best_wave || 0) >= 40,
+  'nameless-core': (state) => (state.achievements.evo_selects || 0) >= 5,
+  'omega-core': (state) => state.unlockedCores.filter(id => CORE_TEMPLATES[id]?.type === 'HIDDEN').length >= 4,
+  'collapse-core': (state) => state.globalArtifacts.includes('ga_19'),
+  'mirror-core': (state) => state.globalArtifacts.includes('ga_18'),
+  'judgment-core': (state) => state.unlockedCores.includes('execution-core') && state.globalArtifacts.includes('ga_6'),
+  'eternity-core': (state) => (state.achievements.best_wave || 0) >= 60,
+};
+
 export default function App() {
   const [gameState, setGameState] = useState<GameState>(INITIAL_GAME_STATE);
   const [core, setCore] = useState<CoreStats>(CORE_TEMPLATES[INITIAL_GAME_STATE.activeCoreId]);
@@ -22,6 +45,7 @@ export default function App() {
   const engineRef = useRef<GameEngine>(new GameEngine());
   const requestRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
+  const previousSummonCountRef = useRef<number>(0);
 
   useEffect(() => {
     const saved = localStorage.getItem('orbital_core_save');
@@ -67,10 +91,47 @@ export default function App() {
 
      if (gameState.globalArtifacts.includes('ga_1')) newCore.attackDamage *= 1.1;
      if (gameState.globalArtifacts.includes('ga_2')) { newCore.maxHp *= 1.2; newCore.hp = newCore.maxHp; }
+     if (gameState.globalArtifacts.includes('ga_5')) newCore.attackDamage *= 1.05;
      if (gameState.globalArtifacts.includes('ga_14')) newCore.defense += 5;
+     if (gameState.globalArtifacts.includes('ga_14')) {
+       newCore.maxShield = (newCore.maxShield || 0) + 25;
+       newCore.shield = (newCore.shield || 0) + 25;
+     }
      if (gameState.globalArtifacts.includes('ga_15')) newCore.attackDamage *= 1.15;
+     if (gameState.globalArtifacts.includes('ga_16') && (newCore.id.includes('prism') || newCore.id.includes('photon'))) {
+       newCore.attackDamage *= 1.15;
+     }
+     if (gameState.globalArtifacts.includes('ga_19') && newCore.hp <= newCore.maxHp * 0.2) newCore.attackDamage *= 1.3;
+     if (gameState.globalArtifacts.includes('ga_20') && newCore.type === 'SUMMON') newCore.attackSpeed *= 0.9;
      
      return newCore;
+  };
+
+  const evaluateArtifactUnlocks = (state: GameState) => {
+    const unlocks: string[] = [];
+    const a = state.achievements;
+    const has = (id: string) => state.globalArtifacts.includes(id);
+    if (!has('ga_1') && (a.boss_kills || 0) >= 1) unlocks.push('ga_1');
+    if (!has('ga_2') && (a.near_death_survive || 0) >= 1) unlocks.push('ga_2');
+    if (!has('ga_3') && (a.blackhole_kills || 0) >= 100) unlocks.push('ga_3');
+    if (!has('ga_4') && (a.time_stop_boss_kills || 0) >= 1) unlocks.push('ga_4');
+    if (!has('ga_5') && (a.econ_upgrades_purchased || 0) >= 50) unlocks.push('ga_5');
+    if (!has('ga_6') && (a.void_watcher_kills || 0) >= 1) unlocks.push('ga_6');
+    if (!has('ga_7') && (a.omega_trial_clear || 0) >= 1) unlocks.push('ga_7');
+    if (!has('ga_8') && (a.frozen_kills || 0) >= 500) unlocks.push('ga_8');
+    if (!has('ga_9') && (a.fire_damage_total || 0) >= 10000) unlocks.push('ga_9');
+    if (!has('ga_10') && (a.reflect_damage_total || 0) >= 5000) unlocks.push('ga_10');
+    if (!has('ga_11') && (a.drone_damage_total || 0) >= 200) unlocks.push('ga_11');
+    if (!has('ga_12') && (a.gold_enemy_kills || 0) >= 10) unlocks.push('ga_12');
+    if (!has('ga_13') && (a.debuffed_kills || 0) >= 300) unlocks.push('ga_13');
+    if (!has('ga_14') && (a.defense_highwave_clear || 0) >= 1) unlocks.push('ga_14');
+    if (!has('ga_15') && (a.no_ult_boss_kills || 0) >= 1) unlocks.push('ga_15');
+    if (!has('ga_16') && (a.prism_usage || 0) >= 1) unlocks.push('ga_16');
+    if (!has('ga_17') && (a.abyss_trial_clear || 0) >= 1) unlocks.push('ga_17');
+    if (!has('ga_18') && (a.clone_kills || 0) >= 100) unlocks.push('ga_18');
+    if (!has('ga_19') && (a.low_hp_seconds || 0) >= 180) unlocks.push('ga_19');
+    if (!has('ga_20') && (a.summons_created_total || 0) >= 500) unlocks.push('ga_20');
+    return unlocks;
   };
 
   const startGame = (coreId?: string) => {
@@ -107,6 +168,37 @@ export default function App() {
     });
   };
 
+  const canEvolveTo = (evoCore: CoreStats) => {
+    if (!evoCore.baseCoreId || evoCore.baseCoreId !== core.id) return false;
+    const requirement = EVOLUTION_REQUIREMENTS[evoCore.id];
+    if (requirement) return requirement({ gameState, core });
+    return gameState.wave >= 15;
+  };
+
+  useEffect(() => {
+    setGameState(prev => {
+      const hiddenToUnlock = Object.values(CORE_TEMPLATES)
+        .filter(c => c.type === 'HIDDEN')
+        .filter(c => !prev.unlockedCores.includes(c.id))
+        .filter(c => HIDDEN_CORE_REQUIREMENTS[c.id]?.(prev));
+
+      if (hiddenToUnlock.length === 0) return prev;
+
+      return {
+        ...prev,
+        unlockedCores: [...prev.unlockedCores, ...hiddenToUnlock.map(c => c.id)]
+      };
+    });
+  }, [gameState.globalArtifacts, gameState.achievements, gameState.unlockedCores]);
+
+  useEffect(() => {
+    setGameState(prev => {
+      const newUnlocks = evaluateArtifactUnlocks(prev);
+      if (newUnlocks.length === 0) return prev;
+      return { ...prev, globalArtifacts: [...prev.globalArtifacts, ...newUnlocks] };
+    });
+  }, [gameState.achievements, gameState.globalArtifacts]);
+
   const handleWaveComplete = () => {
     setGameState(prev => {
       const nextWave = prev.wave + 1;
@@ -119,7 +211,11 @@ export default function App() {
         wave: nextWave, 
         credits: prev.credits + prev.wave * 2 + printerCount * 5,
         runCoins: prev.runCoins + printerCount * 20,
-        availableModules: generateRandomModules()
+        availableModules: generateRandomModules(),
+        achievements: {
+          ...prev.achievements,
+          best_wave: Math.max(prev.achievements.best_wave || 0, nextWave),
+        },
       };
 
       if (isMilestone) {
@@ -134,8 +230,10 @@ export default function App() {
       
       // artifact logic: ga_14 (성채의 문장: 방어형 코어로 30웨이브 달성)
       if (core.type === 'DEFENSE' && nextWave > 30) {
-        if (!nextState.globalArtifacts.includes('ga_14')) nextState.globalArtifacts.push('ga_14');
+        nextState.achievements.defense_highwave_clear = 1;
       }
+      if (core.id.includes('omega') && nextWave >= 30) nextState.achievements.omega_trial_clear = 1;
+      if (core.id.includes('abyss') && nextWave >= 30) nextState.achievements.abyss_trial_clear = 1;
 
       return nextState;
     });
@@ -172,8 +270,8 @@ export default function App() {
 
   const evolutionOptions = React.useMemo(() => {
     if (!gameState.pendingEvolution) return [];
-    return Object.values(CORE_TEMPLATES).filter(c => c.baseCoreId === core.id);
-  }, [gameState.pendingEvolution, core.id]);
+    return Object.values(CORE_TEMPLATES).filter(c => c.baseCoreId === core.id && canEvolveTo(c));
+  }, [gameState.pendingEvolution, core.id, gameState.wave, gameState.globalArtifacts, gameState.achievements]);
 
   const selectEvolution = (evoCoreId: string) => {
      setGameState(prev => ({
@@ -186,26 +284,50 @@ export default function App() {
        ...newCoreTemplate,
        hp: newCoreTemplate.maxHp * hpPercent
      });
+     setGameState(prev => ({
+       ...prev,
+       achievements: {
+         ...prev.achievements,
+         evo_selects: (prev.achievements.evo_selects || 0) + 1
+       }
+     }));
   };
 
-  const handleEnemyKill = (reward: number, isBoss: boolean = false, byUlt: boolean = false) => {
+  const handleEnemyKill = (reward: number, isBoss: boolean = false, byUlt: boolean = false, enemy?: any, method?: string) => {
     const coinMult = gameState.artifacts.includes('art_5') ? 1.3 : 1;
     const harvesterCount = engineRef.current.modules.filter(m => m.type === 'HARVESTER').length;
-    const finalCoinMult = coinMult * (1 + 0.5 * harvesterCount);
+    const gaRewardMult = gameState.globalArtifacts.includes('ga_12') ? 1.2 : 1;
+    const finalCoinMult = coinMult * (1 + 0.5 * harvesterCount) * gaRewardMult;
     const ultMult = gameState.artifacts.includes('art_8') ? 1.3 : 1;
     
     setGameState(prev => {
       const next = { 
         ...prev, 
         runCoins: prev.runCoins + (reward * finalCoinMult),
-        ultCharge: Math.min(core.ultMax || 100, prev.ultCharge + (reward * 0.5 * ultMult)) 
+        ultCharge: Math.min(core.ultMax || 100, prev.ultCharge + (reward * 0.5 * ultMult)),
+        achievements: {
+          ...prev.achievements,
+          total_kills: (prev.achievements.total_kills || 0) + 1,
+          frozen_kills: (prev.achievements.frozen_kills || 0) + ((enemy?.freezeTimer || 0) > 0 ? 1 : 0),
+          gold_enemy_kills: (prev.achievements.gold_enemy_kills || 0) + (enemy?.type === 'GOLD_SLIME' ? 1 : 0),
+          clone_kills: (prev.achievements.clone_kills || 0) + (String(enemy?.type || '').includes('CLONE') ? 1 : 0),
+          debuffed_kills: (prev.achievements.debuffed_kills || 0) + (((enemy?.freezeTimer || 0) > 0 || (enemy?.slowTimer || 0) > 0 || (enemy?.burnTimer || 0) > 0 || (enemy?.vulnTimer || 0) > 0) ? 1 : 0),
+          blackhole_kills: (prev.achievements.blackhole_kills || 0) + ((byUlt && (engineRef.current.activeUltName || '').includes('BLACK')) ? 1 : 0),
+          fire_damage_total: (prev.achievements.fire_damage_total || 0) + ((method === 'BURN' || (enemy?.burnTimer || 0) > 0) ? Math.max(1, enemy?.maxHp || 1) : 0),
+          reflect_damage_total: (prev.achievements.reflect_damage_total || 0) + (method === 'REFLECT' ? Math.max(1, enemy?.maxHp || 1) : 0),
+          drone_damage_total: (prev.achievements.drone_damage_total || 0) + (method === 'SUMMON' ? Math.max(1, enemy?.maxHp || 1) : 0),
+        }
       };
 
       if (isBoss) {
-        if (!next.globalArtifacts.includes('ga_1')) next.globalArtifacts.push('ga_1');
+        next.achievements.boss_kills = (next.achievements.boss_kills || 0) + 1;
+        if (core.id.includes('void')) next.achievements.void_watcher_kills = (next.achievements.void_watcher_kills || 0) + 1;
+        if (engineRef.current.isUltActive && /TIME|STASIS|REWIND/.test(engineRef.current.activeUltName || '')) {
+          next.achievements.time_stop_boss_kills = (next.achievements.time_stop_boss_kills || 0) + 1;
+        }
         // If not 'byUlt' (궁극기 없이 10웨이브 보스 처치)... simplified logic:
-        if (!engineRef.current.usedUltThisWave && prev.wave === 10) {
-           if (!next.globalArtifacts.includes('ga_15')) next.globalArtifacts.push('ga_15');
+        if (!engineRef.current.usedUltThisWave) {
+           next.achievements.no_ult_boss_kills = (next.achievements.no_ult_boss_kills || 0) + 1;
         }
       }
 
@@ -232,7 +354,13 @@ export default function App() {
       
       // artifact ga_2: 체력 1% 이하 생존
       if (nextHp > 0 && nextHp <= prev.maxHp * 0.01) {
-         unlockArtifact('ga_2');
+         setGameState(gs => ({
+           ...gs,
+           achievements: {
+             ...gs.achievements,
+             near_death_survive: (gs.achievements.near_death_survive || 0) + 1
+           }
+         }));
       }
 
       if (nextHp <= 0) {
@@ -244,7 +372,14 @@ export default function App() {
 
   const activateUlt = () => {
     if (gameState.ultCharge >= (core.ultMax || 100)) {
-       setGameState(prev => ({ ...prev, ultCharge: 0 }));
+       setGameState(prev => ({
+         ...prev,
+         ultCharge: 0,
+         achievements: {
+           ...prev.achievements,
+           ult_uses: (prev.achievements.ult_uses || 0) + 1
+         }
+       }));
        engineRef.current.triggerUltimate(core);
     }
   };
@@ -292,7 +427,11 @@ export default function App() {
       setGameState(prev => ({
         ...prev,
         runCoins: prev.runCoins - cost,
-        permanentUpgrades: { ...prev.permanentUpgrades, [upgradeId]: level + 1 }
+        permanentUpgrades: { ...prev.permanentUpgrades, [upgradeId]: level + 1 },
+        achievements: {
+          ...prev.achievements,
+          econ_upgrades_purchased: (prev.achievements.econ_upgrades_purchased || 0) + (core.type === 'ECONOMIC' ? 1 : 0)
+        }
       }));
 
       // Apply effect
@@ -344,8 +483,29 @@ export default function App() {
       const deltaTime = (time - lastTimeRef.current) / 1000;
       const ctx = canvasRef.current?.getContext('2d');
       if (ctx) {
-        engineRef.current.update(core, Math.min(deltaTime, 0.1), gameState.wave, gameState.artifacts, handleEnemyKill, handleCoreDamage, handleWaveComplete);
+        engineRef.current.update(core, Math.min(deltaTime, 0.1), gameState.wave, [...gameState.artifacts, ...gameState.globalArtifacts], handleEnemyKill, handleCoreDamage, handleWaveComplete);
         engineRef.current.render(ctx, core);
+        if (core.hp > 0 && core.hp <= core.maxHp * 0.2) {
+          setGameState(prev => ({
+            ...prev,
+            achievements: {
+              ...prev.achievements,
+              low_hp_seconds: (prev.achievements.low_hp_seconds || 0) + Math.min(deltaTime, 0.1)
+            }
+          }));
+        }
+        const summonCount = engineRef.current.summons.length;
+        if (summonCount > previousSummonCountRef.current) {
+          const created = summonCount - previousSummonCountRef.current;
+          setGameState(prev => ({
+            ...prev,
+            achievements: {
+              ...prev.achievements,
+              summons_created_total: (prev.achievements.summons_created_total || 0) + created
+            }
+          }));
+        }
+        previousSummonCountRef.current = summonCount;
         setEngineState({ 
            enemies: engineRef.current.enemies.length, 
            ultActive: engineRef.current.isUltActive,
@@ -548,6 +708,7 @@ export default function App() {
                              {[...coresInCategory, ...evolutionCores].map(tpl => {
                                const isUnlocked = gameState.unlockedCores.includes(tpl.id);
                                const isEvo = !!tpl.baseCoreId;
+                               const isHidden = tpl.type === 'HIDDEN';
                                return (
                                  <div key={tpl.id} className="relative group">
                                    <button 
@@ -565,7 +726,12 @@ export default function App() {
                                    </button>
                                    {!isUnlocked && (
                                      <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity">
-                                       {isEvo ? (
+                                       {isHidden ? (
+                                         <>
+                                            <Lock className="w-4 h-4 text-[#A855F7] mb-1" />
+                                            <p className="text-[8px] text-[#D1D5DB] text-center px-2 font-mono">HIDDEN CORE</p>
+                                         </>
+                                       ) : isEvo ? (
                                          <>
                                             <Lock className="w-4 h-4 text-[#A855F7] mb-1" />
                                             <p className="text-[8px] text-[#D1D5DB] text-center px-2 font-mono">UNLOCK COND: {tpl.evolutionCondition}</p>
@@ -745,7 +911,14 @@ export default function App() {
                   onClick={() => {
                      if (ultPercent >= 100 && !engineRef.current.usedUltThisWave) {
                         engineRef.current.triggerUltimate(core);
-                        setGameState(p => ({ ...p, ultCharge: 0 }));
+                        setGameState(p => ({
+                          ...p,
+                          ultCharge: 0,
+                          achievements: {
+                            ...p.achievements,
+                            ult_uses: (p.achievements.ult_uses || 0) + 1
+                          }
+                        }));
                      }
                   }} 
                   disabled={ultPercent < 100 || engineRef.current.usedUltThisWave}
