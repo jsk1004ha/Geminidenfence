@@ -547,10 +547,12 @@ export default function App() {
     const ultMult = gameState.artifacts.includes('art_8') ? 1.3 : 1;
     
     setGameState(prev => {
+      const lateWavePenalty = Math.max(0, prev.wave - 60) * 0.012;
+      const ultChargeWaveMult = Math.max(0.35, 1 - lateWavePenalty);
       const next = { 
         ...prev, 
         runCoins: prev.runCoins + (reward * finalCoinMult),
-        ultCharge: Math.min(core.ultMax || 100, prev.ultCharge + (reward * 0.5 * ultMult)),
+        ultCharge: Math.min(core.ultMax || 100, prev.ultCharge + (reward * 0.5 * ultMult * ultChargeWaveMult)),
         achievements: {
           ...prev.achievements,
           total_kills: (prev.achievements.total_kills || 0) + 1,
