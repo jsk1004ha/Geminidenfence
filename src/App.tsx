@@ -1409,11 +1409,11 @@ export default function App() {
                    )}
                 </button>
 
-                <button onClick={() => setGameState(p => ({ ...p, isPaused: !p.isPaused }))} className="px-6 bg-[#0A0A0C]/90 backdrop-blur border border-[#2D2D33] text-[#D1D5DB] rounded-sm hover:bg-[#1A1A1E] transition-colors shadow-xl">
+                <button onClick={() => setGameState(p => ({ ...p, isPaused: !p.isPaused }))} className="px-6 -translate-y-2 bg-[#0A0A0C]/90 backdrop-blur border border-[#2D2D33] text-[#D1D5DB] rounded-sm hover:bg-[#1A1A1E] transition-colors shadow-xl">
                   {gameState.isPaused ? <Play className="w-4 h-4 fill-current" /> : <Pause className="w-4 h-4 fill-current" />}
                 </button>
 
-                <div className="flex items-center gap-1 bg-[#0A0A0C]/90 backdrop-blur border border-[#2D2D33] rounded-sm p-1 shadow-xl">
+                <div className="flex items-center gap-1 -translate-y-2 bg-[#0A0A0C]/90 backdrop-blur border border-[#2D2D33] rounded-sm p-1 shadow-xl">
                   {[0.5, 1, 2, 4].map(speed => (
                     <button
                       key={speed}

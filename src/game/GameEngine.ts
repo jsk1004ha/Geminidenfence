@@ -710,12 +710,18 @@ export class GameEngine {
          const dx = CORE_X - p.x;
          const dy = CORE_Y - p.y;
          const dist = Math.sqrt(dx*dx + dy*dy);
+         const moveStep = p.speed * deltaTime * 1000;
          if (dist < 20) {
             onCoreDamage(Math.max(1, p.damage - core.defense));
             p.damage = 0;
+         } else if (moveStep >= dist) {
+            onCoreDamage(Math.max(1, p.damage - core.defense));
+            p.x = CORE_X;
+            p.y = CORE_Y;
+            p.damage = 0;
          } else {
-            p.x += (dx / dist) * p.speed * deltaTime * 1000;
-            p.y += (dy / dist) * p.speed * deltaTime * 1000;
+            p.x += (dx / dist) * moveStep;
+            p.y += (dy / dist) * moveStep;
          }
          return;
       }
@@ -749,7 +755,13 @@ export class GameEngine {
         }
         const dist = Math.sqrt(dx * dx + dy * dy);
         
-        if (dist < 15) {
+        let spd = p.speed * deltaTime * 1000;
+        if (p.type === 'LASER_BEAM') spd *= 2;
+        const reachedTarget = dist < 15 || spd >= dist;
+
+        if (reachedTarget) {
+          p.x = target.x;
+          p.y = target.y;
           // On Hit Logic
           if (target.evasion && Math.random() < target.evasion) {
              // Avoided
@@ -813,8 +825,6 @@ export class GameEngine {
           }
         } else {
           // Move towards target
-          let spd = p.speed * deltaTime * 1000;
-          if (p.type === 'LASER_BEAM') spd *= 2; 
           p.x += (dx / dist) * spd;
           p.y += (dy / dist) * spd;
         }
